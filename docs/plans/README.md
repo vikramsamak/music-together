@@ -35,16 +35,21 @@ Single test: `npm run test -w api`.
 
 ## Redis keys
 
-- `room:{id}` — hash: playback state (`currentVideoId`, `playing`, `position`, `updatedAt`, `version`, meta)
-- `room:{id}:queue` — list of JSON tracks `{ videoId, url, title, addedBy, addedAt }`
+- `room:{id}` — hash: playback state (`currentVideoId`, `currentTrackId`, `playing`, `position`, `updatedAt`, `version`, meta)
+- `room:{id}:queue` — list of JSON tracks `{ id, videoId, url, title, addedBy, addedAt }`
 - `room:{id}:chat` — list of JSON messages, capped to last 100 (RPUSH + LTRIM)
 
 ## WS protocol (JSON, socket.io)
 
 Client → server: `join`, `chat:send`, `queue:add`, `queue:remove`, `player:play`,
-`player:pause`, `player:seek`, `player:next`, `player:prev`
+`player:pause`, `player:seek`, `player:next`, `player:prev`, `player:ended`
 Server → client: `joined` (snapshot), `presence:update`, `chat:new`, `queue:update`,
-`playback:update`, `error`
+`playback:update`, `queue:added`, `chat:sent`, `error`
+
+`playback:update` carries `{ state, senderId, now }`; `state` is
+`{ currentVideoId, currentTrackId, playing, position, updatedAt, version }`. Clients
+treat incoming state idempotently (own echo is a no-op) so `next`/`prev`/`ended`
+apply for the sender too.
 
 ## Phases
 

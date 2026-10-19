@@ -2,29 +2,120 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import YouTubePlayer, { type PlayerHandle } from "@/components/YouTubePlayer";
 import { useRoomSocket } from "@/hooks/useRoomSocket";
 import { useGuestName, useStoredName } from "@/lib/name";
+import { formatTime, serverPosition } from "@/lib/playback";
 
-const CHAT_ERRORS: Record<string, string> = {
+const ERRORS: Record<string, string> = {
   RATE_LIMITED: "You're sending messages too fast — wait a moment.",
   BAD_REQUEST: "Message must be 1-500 characters.",
   NOT_JOINED: "Not connected to the room yet.",
+  BAD_VIDEO: "That doesn't look like a YouTube link.",
 };
+
+const DRIFT_TOLERANCE_S = 2;
 
 export default function RoomClient({ roomId }: { roomId: string }) {
   const stored = useStoredName();
   const guest = useGuestName();
   const name = (stored ?? guest) || null;
-  const { status, members, room, error, errorCode, chat, sendChat, clientId } =
-    useRoomSocket(roomId, name);
+  const {
+    status,
+    members,
+    error,
+    errorCode,
+    chat,
+    queue,
+    playback,
+    playbackEvent,
+    playbackRef,
+    clientId,
+    sendChat,
+    addTrack,
+    removeTrack,
+    play,
+    pause,
+    seek,
+    next,
+    prev,
+    reportEnded,
+    serverNow,
+  } = useRoomSocket(roomId, name);
   const [copied, setCopied] = useState(false);
   const [draft, setDraft] = useState("");
+  const [trackUrl, setTrackUrl] = useState("");
+  const [nowSec, setNowSec] = useState(0);
+  const [duration, setDuration] = useState(0);
   const chatListRef = useRef<HTMLUListElement>(null);
+  const playerRef = useRef<PlayerHandle | null>(null);
+  const loadedVideoIdRef = useRef<string | null>(null);
+  const serverNowRef = useRef(serverNow);
+  const playing = playback?.playing ?? false;
+  const currentTrack = queue.find((t) => t.id === playback?.currentTrackId);
+
+  useEffect(() => {
+    serverNowRef.current = serverNow;
+  });
 
   useEffect(() => {
     const el = chatListRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [chat]);
+
+  useEffect(() => {
+    if (!playbackEvent) return;
+    const player = playerRef.current;
+    if (!player) return;
+    const state = playbackEvent.state;
+    const target = serverPosition(state, serverNowRef.current());
+
+    if (!state.currentVideoId) {
+      loadedVideoIdRef.current = null;
+      player.pause();
+      return;
+    }
+    if (loadedVideoIdRef.current !== state.currentVideoId) {
+      loadedVideoIdRef.current = state.currentVideoId;
+      if (state.playing) player.load(state.currentVideoId, target);
+      else player.cue(state.currentVideoId, target);
+    } else if (Math.abs(player.getCurrentTime() - target) > 0.5) {
+      player.seekTo(target);
+    }
+    if (state.playing && !player.isPlaying()) player.play();
+    if (!state.playing && player.isPlaying()) player.pause();
+  }, [playbackEvent]);
+
+  useEffect(() => {
+    if (status !== "joined") return;
+    const timer = setInterval(() => {
+      const player = playerRef.current;
+      const state = playbackRef.current;
+      if (!player || !state?.currentVideoId) return;
+      if (loadedVideoIdRef.current !== state.currentVideoId) return;
+      const target = serverPosition(state, serverNowRef.current());
+      if (state.playing) {
+        if (Math.abs(player.getCurrentTime() - target) > DRIFT_TOLERANCE_S) {
+          player.seekTo(target);
+        }
+        if (!player.isPlaying()) player.play();
+      } else if (player.isPlaying()) {
+        player.pause();
+      }
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [status, playbackRef]);
+
+  useEffect(() => {
+    if (status !== "joined") return;
+    const timer = setInterval(() => {
+      const player = playerRef.current;
+      if (!player) return;
+      setNowSec(player.getCurrentTime());
+      setDuration(player.getDuration());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [status]);
 
   if (!name) {
     return <div className="p-8 text-zinc-500">Loading...</div>;
@@ -38,6 +129,11 @@ export default function RoomClient({ roomId }: { roomId: string }) {
     } catch {
       // clipboard unavailable
     }
+  };
+
+  const commitSeek = (position: number) => {
+    playerRef.current?.seekTo(position);
+    seek(position);
   };
 
   return (
@@ -77,7 +173,10 @@ export default function RoomClient({ roomId }: { roomId: string }) {
           </h2>
           <ul className="flex-1 overflow-y-auto p-2">
             {members.map((m) => (
-              <li key={m.clientId} className="px-2 py-1 text-sm text-zinc-800 dark:text-zinc-200">
+              <li
+                key={m.clientId}
+                className="px-2 py-1 text-sm text-zinc-800 dark:text-zinc-200"
+              >
                 {m.name}
                 {m.clientId === clientId && (
                   <span className="ml-1 text-xs text-zinc-400">(you)</span>
@@ -91,9 +190,126 @@ export default function RoomClient({ roomId }: { roomId: string }) {
           <h2 className="border-b border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:text-zinc-300">
             Player
           </h2>
-          <div className="flex flex-1 items-center justify-center p-4 text-sm text-zinc-400">
-            Player comes in Phase 3 · created {room ? "room ok" : "..."}
+          <YouTubePlayer
+            ref={playerRef}
+            onEnded={() => {
+              const state = playbackRef.current;
+              if (state?.currentVideoId) {
+                reportEnded(state.currentVideoId, state.version);
+              }
+            }}
+          />
+          <div className="flex flex-col gap-2 p-4">
+            <p className="truncate text-sm font-medium text-zinc-800 dark:text-zinc-200">
+              {currentTrack?.title ??
+                (playback?.currentVideoId
+                  ? playback.currentVideoId
+                  : "Nothing playing — paste a YouTube link below.")}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => (playing ? pause() : play())}
+                disabled={!playback?.currentVideoId}
+                className="rounded bg-zinc-900 px-3 py-1 text-sm font-medium text-white disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900"
+              >
+                {playing ? "Pause" : "Play"}
+              </button>
+              <button
+                onClick={() => prev()}
+                disabled={queue.length === 0}
+                className="rounded border border-zinc-300 px-2 py-1 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+              >
+                Prev
+              </button>
+              <button
+                onClick={() => next()}
+                disabled={queue.length === 0}
+                className="rounded border border-zinc-300 px-2 py-1 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+              >
+                Next
+              </button>
+              <span className="ml-1 text-xs tabular-nums text-zinc-500">
+                {formatTime(nowSec)} / {formatTime(duration)}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={Math.max(1, Math.floor(duration || 0))}
+              value={Math.min(nowSec, Math.floor(duration || 0))}
+              onChange={(e) => setNowSec(Number(e.target.value))}
+              onMouseUp={(e) => commitSeek(Number(e.currentTarget.value))}
+              onTouchEnd={(e) => commitSeek(Number(e.currentTarget.value))}
+              onKeyUp={(e) => commitSeek(Number(e.currentTarget.value))}
+              disabled={!playback?.currentVideoId}
+              className="w-full accent-zinc-900 disabled:opacity-40 dark:accent-zinc-100"
+            />
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const url = trackUrl.trim();
+                if (url) {
+                  addTrack(url);
+                  setTrackUrl("");
+                }
+              }}
+              className="flex gap-2"
+            >
+              <input
+                value={trackUrl}
+                onChange={(e) => setTrackUrl(e.target.value)}
+                placeholder="Paste a YouTube link to add to the queue"
+                className="w-full rounded border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+              />
+              <button
+                type="submit"
+                disabled={!trackUrl.trim()}
+                className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+              >
+                Add
+              </button>
+            </form>
+            {errorCode && (
+              <p className="text-xs text-red-600">
+                {ERRORS[errorCode] ?? "Something went wrong."}
+              </p>
+            )}
           </div>
+          <h3 className="border-y border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:text-zinc-300">
+            Up next ({queue.length})
+          </h3>
+          <ul className="max-h-56 overflow-y-auto p-2">
+            {queue.map((t) => (
+              <li
+                key={t.id}
+                className={`flex items-center gap-2 rounded px-2 py-1 text-sm ${
+                  t.id === playback?.currentTrackId
+                    ? "bg-zinc-100 font-medium text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100"
+                    : "text-zinc-700 dark:text-zinc-300"
+                }`}
+              >
+                <span className="truncate">
+                  {t.id === playback?.currentTrackId ? "▶ " : ""}
+                  {t.title}
+                </span>
+                <span className="ml-auto shrink-0 text-xs text-zinc-400">
+                  {t.addedBy}
+                </span>
+                <button
+                  onClick={() => removeTrack(t.id)}
+                  className="shrink-0 text-zinc-400 hover:text-red-600"
+                  title="Remove from queue"
+                >
+                  &times;
+                </button>
+              </li>
+            ))}
+            {queue.length === 0 && (
+              <li className="px-2 py-1 text-sm text-zinc-400">
+                Queue is empty.
+              </li>
+            )}
+          </ul>
         </section>
       </div>
 
@@ -156,11 +372,6 @@ export default function RoomClient({ roomId }: { roomId: string }) {
             Send
           </button>
         </form>
-        {errorCode && (
-          <p className="px-4 pb-2 text-xs text-red-600">
-            {CHAT_ERRORS[errorCode] ?? "Something went wrong."}
-          </p>
-        )}
       </section>
     </div>
   );
