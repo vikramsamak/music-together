@@ -58,6 +58,7 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   const [nowSec, setNowSec] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playerReady, setPlayerReady] = useState(false);
+  const [activePanel, setActivePanel] = useState<"chat" | "members">("chat");
   const chatListRef = useRef<HTMLUListElement>(null);
   const playerRef = useRef<PlayerHandle | null>(null);
   const loadedVideoIdRef = useRef<string | null>(null);
@@ -178,15 +179,15 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   };
 
   return (
-    <div className="flex flex-1 flex-col gap-6 p-8">
-      <header className="flex items-center gap-4">
+    <div className="flex flex-1 flex-col gap-4 p-4 sm:gap-6 sm:p-6 lg:p-8">
+      <header className="flex flex-wrap items-center gap-3 sm:gap-4">
         <Link
           href="/"
           className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
         >
           &larr; Home
         </Link>
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
+        <h1 className="text-lg font-semibold text-zinc-900 sm:text-xl dark:text-zinc-100">
           Room{" "}
           <button
             onClick={copyCode}
@@ -198,270 +199,362 @@ export default function RoomClient({ roomId }: { roomId: string }) {
           {copied && <span className="ml-2 text-xs text-zinc-500">copied</span>}
         </h1>
         <ShareRoom roomId={roomId} />
-        <span className="ml-auto text-sm text-zinc-500">
+        <span className="ml-auto text-xs text-zinc-500 sm:text-sm">
           {status === "joined" && "connected"}
           {status === "connecting" && "connecting..."}
           {status === "disconnected" && "reconnecting..."}
           {status === "error" && "error"}
         </span>
+        <button
+          onClick={() => setActivePanel(activePanel === "members" ? "chat" : "members")}
+          className="inline-flex items-center gap-1 rounded border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900 lg:hidden"
+        >
+          {activePanel === "members" ? "Chat" : `People (${members.length})`}
+        </button>
       </header>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="grid flex-1 grid-cols-1 gap-6 md:grid-cols-3">
-        <section className="flex flex-col rounded border border-zinc-200 dark:border-zinc-800">
-          <h2 className="border-b border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:text-zinc-300">
-            Members ({members.length})
-          </h2>
-          <ul className="flex-1 overflow-y-auto p-2">
-            {members.map((m) => (
-              <li
-                key={m.clientId}
-                className="px-2 py-1 text-sm text-zinc-800 dark:text-zinc-200"
-              >
-                {m.name}
-                {m.clientId === clientId && (
-                  <span className="ml-1 text-xs text-zinc-400">(you)</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="flex flex-col rounded border border-zinc-200 md:col-span-2 dark:border-zinc-800">
-          <h2 className="border-b border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:text-zinc-300">
-            Player
-          </h2>
-          <YouTubePlayer
-            ref={playerRef}
-            onReady={() => setPlayerReady(true)}
-            onEnded={() => {
-              const state = playbackRef.current;
-              if (state?.currentVideoId) {
-                reportEnded(state.currentVideoId, state.version);
-              }
-            }}
-          />
-          <div className="flex flex-col gap-2 p-4">
-            <p className="truncate text-sm font-medium text-zinc-800 dark:text-zinc-200">
-              {currentTrack?.title ??
-                (playback?.currentVideoId
-                  ? playback.currentVideoId
-                  : "Nothing playing — paste a YouTube link below.")}
-            </p>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => (playing ? pause() : play())}
-                disabled={!playback?.currentVideoId}
-                className="rounded bg-zinc-900 px-3 py-1 text-sm font-medium text-white disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900"
-              >
-                {playing ? "Pause" : "Play"}
-              </button>
-              <button
-                onClick={() => prev()}
-                disabled={queue.length === 0}
-                className="rounded border border-zinc-300 px-2 py-1 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
-              >
-                Prev
-              </button>
-              <button
-                onClick={() => next()}
-                disabled={queue.length === 0}
-                className="rounded border border-zinc-300 px-2 py-1 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
-              >
-                Next
-              </button>
-              <span className="ml-1 text-xs tabular-nums text-zinc-500">
-                {formatTime(nowSec)} / {formatTime(duration)}
-              </span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={Math.max(1, Math.floor(duration || 0))}
-              value={Math.min(nowSec, Math.floor(duration || 0))}
-              onChange={(e) => setNowSec(Number(e.target.value))}
-              onMouseUp={(e) => commitSeek(Number(e.currentTarget.value))}
-              onTouchEnd={(e) => commitSeek(Number(e.currentTarget.value))}
-              onKeyUp={(e) => commitSeek(Number(e.currentTarget.value))}
-              disabled={!playback?.currentVideoId}
-              className="w-full accent-zinc-900 disabled:opacity-40 dark:accent-zinc-100"
+      <div className="grid flex-1 min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-6">
+        <main className="flex min-w-0 flex-col gap-4">
+          <section className="flex flex-col rounded border border-zinc-200 dark:border-zinc-800">
+            <h2 className="border-b border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:text-zinc-300">
+              Player
+            </h2>
+            <YouTubePlayer
+              ref={playerRef}
+              onReady={() => setPlayerReady(true)}
+              onEnded={() => {
+                const state = playbackRef.current;
+                if (state?.currentVideoId) {
+                  reportEnded(state.currentVideoId, state.version);
+                }
+              }}
             />
+            <div className="flex flex-col gap-2 p-4">
+              <p className="truncate text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                {currentTrack?.title ??
+                  (playback?.currentVideoId
+                    ? playback.currentVideoId
+                    : "Nothing playing — paste a YouTube link below.")}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => (playing ? pause() : play())}
+                  disabled={!playback?.currentVideoId}
+                  className="rounded bg-zinc-900 px-3 py-1 text-sm font-medium text-white disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900"
+                >
+                  {playing ? "Pause" : "Play"}
+                </button>
+                <button
+                  onClick={() => prev()}
+                  disabled={queue.length === 0}
+                  className="rounded border border-zinc-300 px-2 py-1 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+                >
+                  Prev
+                </button>
+                <button
+                  onClick={() => next()}
+                  disabled={queue.length === 0}
+                  className="rounded border border-zinc-300 px-2 py-1 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+                >
+                  Next
+                </button>
+                <span className="ml-1 text-xs tabular-nums text-zinc-500">
+                  {formatTime(nowSec)} / {formatTime(duration)}
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={Math.max(1, Math.floor(duration || 0))}
+                value={Math.min(nowSec, Math.floor(duration || 0))}
+                onChange={(e) => setNowSec(Number(e.target.value))}
+                onMouseUp={(e) => commitSeek(Number(e.currentTarget.value))}
+                onTouchEnd={(e) => commitSeek(Number(e.currentTarget.value))}
+                onKeyUp={(e) => commitSeek(Number(e.currentTarget.value))}
+                disabled={!playback?.currentVideoId}
+                className="w-full accent-zinc-900 disabled:opacity-40 dark:accent-zinc-100"
+              />
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const url = trackUrl.trim();
+                  if (url) {
+                    addTrack(url);
+                    setTrackUrl("");
+                  }
+                }}
+                className="flex flex-col gap-2 sm:flex-row"
+              >
+                <input
+                  value={trackUrl}
+                  onChange={(e) => setTrackUrl(e.target.value)}
+                  placeholder="Paste a YouTube link to add to the queue"
+                  className="w-full rounded border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                />
+                <button
+                  type="submit"
+                  disabled={!trackUrl.trim()}
+                  className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 sm:shrink-0 dark:bg-zinc-100 dark:text-zinc-900"
+                >
+                  Add
+                </button>
+              </form>
+              <form onSubmit={runSearch} className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search YouTube..."
+                  className="w-full rounded border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                />
+                <button
+                  type="submit"
+                  disabled={query.trim().length < 2 || searching}
+                  className="shrink-0 rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
+                >
+                  {searching ? "..." : "Search"}
+                </button>
+              </form>
+              {searchError && (
+                <p className="text-xs text-zinc-500">{searchError}</p>
+              )}
+              {results.length > 0 && (
+                <ul className="max-h-48 overflow-y-auto rounded border border-zinc-200 dark:border-zinc-800">
+                  {results.map((r) => (
+                    <li
+                      key={r.videoId}
+                      className="flex items-center gap-2 px-2 py-1 text-sm"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-zinc-700 dark:text-zinc-300">
+                        {r.title}
+                      </span>
+                      <span className="shrink-0 text-xs tabular-nums text-zinc-400">
+                        {formatTime(r.durationSeconds)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          addTrack(`https://youtu.be/${r.videoId}`);
+                          setResults([]);
+                          setQuery("");
+                        }}
+                        className="shrink-0 rounded border border-zinc-300 px-2 py-0.5 text-xs text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
+                      >
+                        Add
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {errorCode && (
+                <p className="text-xs text-red-600">
+                  {ERRORS[errorCode] ?? "Something went wrong."}
+                </p>
+              )}
+            </div>
+            <h3 className="border-y border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:text-zinc-300">
+              Up next ({queue.length})
+            </h3>
+            <ul className="max-h-56 overflow-y-auto p-2">
+              {queue.map((t) => (
+                <li
+                  key={t.id}
+                  className={`flex items-center gap-2 rounded px-2 py-1 text-sm ${
+                    t.id === playback?.currentTrackId
+                      ? "bg-zinc-100 font-medium text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100"
+                      : "text-zinc-700 dark:text-zinc-300"
+                  }`}
+                >
+                  <span className="min-w-0 flex-1 truncate">
+                    {t.id === playback?.currentTrackId ? "▶ " : ""}
+                    {t.title}
+                  </span>
+                  <span className="shrink-0 text-xs text-zinc-400">
+                    {t.addedBy}
+                  </span>
+                  <button
+                    onClick={() => removeTrack(t.id)}
+                    className="shrink-0 text-zinc-400 hover:text-red-600"
+                    title="Remove from queue"
+                  >
+                    &times;
+                  </button>
+                </li>
+              ))}
+              {queue.length === 0 && (
+                <li className="px-2 py-1 text-sm text-zinc-400">
+                  Queue is empty.
+                </li>
+              )}
+            </ul>
+          </section>
+        </main>
+
+        <aside className="flex min-w-0 flex-col gap-4 lg:h-[calc(100dvh-5rem)] lg:sticky lg:top-4">
+          <section className="hidden flex-1 flex-col rounded border border-zinc-200 dark:border-zinc-800 lg:flex">
+            <h2 className="border-b border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:text-zinc-300">
+              Chat
+            </h2>
+            <ul
+              ref={chatListRef}
+              className="flex-1 overflow-y-auto px-4 py-2 text-sm"
+            >
+              {chat.map((m) => (
+                <li key={m.id} className="py-0.5 text-zinc-800 dark:text-zinc-200">
+                  <span
+                    className={
+                      m.clientId === clientId
+                        ? "font-semibold text-zinc-950 dark:text-white"
+                        : "font-medium text-zinc-600 dark:text-zinc-400"
+                    }
+                  >
+                    {m.name}
+                  </span>
+                  <span className="text-zinc-400">
+                    {" "}
+                    {new Date(m.at).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                  : {m.text}
+                </li>
+              ))}
+              {chat.length === 0 && (
+                <li className="py-1 text-zinc-400">No messages yet — say hi.</li>
+              )}
+            </ul>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                const url = trackUrl.trim();
-                if (url) {
-                  addTrack(url);
-                  setTrackUrl("");
+                const text = draft.trim();
+                if (text) {
+                  sendChat(text);
+                  setDraft("");
                 }
               }}
-              className="flex gap-2"
+              className="flex gap-2 border-t border-zinc-200 p-2 dark:border-zinc-800"
             >
               <input
-                value={trackUrl}
-                onChange={(e) => setTrackUrl(e.target.value)}
-                placeholder="Paste a YouTube link to add to the queue"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                maxLength={500}
+                placeholder="Type a message..."
                 className="w-full rounded border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
               />
               <button
                 type="submit"
-                disabled={!trackUrl.trim()}
+                disabled={!draft.trim()}
                 className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
               >
-                Add
+                Send
               </button>
             </form>
-            <form onSubmit={runSearch} className="flex gap-2">
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search YouTube..."
-                className="w-full rounded border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-              />
+          </section>
+
+          <div className="flex flex-col rounded border border-zinc-200 lg:hidden dark:border-zinc-800">
+            <div className="flex border-b border-zinc-200 dark:border-zinc-800">
               <button
-                type="submit"
-                disabled={query.trim().length < 2 || searching}
-                className="shrink-0 rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
-              >
-                {searching ? "..." : "Search"}
-              </button>
-            </form>
-            {searchError && (
-              <p className="text-xs text-zinc-500">{searchError}</p>
-            )}
-            {results.length > 0 && (
-              <ul className="max-h-48 overflow-y-auto rounded border border-zinc-200 dark:border-zinc-800">
-                {results.map((r) => (
-                  <li
-                    key={r.videoId}
-                    className="flex items-center gap-2 px-2 py-1 text-sm"
-                  >
-                    <span className="truncate text-zinc-700 dark:text-zinc-300">
-                      {r.title}
-                    </span>
-                    <span className="ml-auto shrink-0 text-xs text-zinc-400">
-                      {formatTime(r.durationSeconds)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        addTrack(`https://youtu.be/${r.videoId}`);
-                        setResults([]);
-                        setQuery("");
-                      }}
-                      className="shrink-0 rounded border border-zinc-300 px-2 py-0.5 text-xs text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
-                    >
-                      Add
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {errorCode && (
-              <p className="text-xs text-red-600">
-                {ERRORS[errorCode] ?? "Something went wrong."}
-              </p>
-            )}
-          </div>
-          <h3 className="border-y border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:text-zinc-300">
-            Up next ({queue.length})
-          </h3>
-          <ul className="max-h-56 overflow-y-auto p-2">
-            {queue.map((t) => (
-              <li
-                key={t.id}
-                className={`flex items-center gap-2 rounded px-2 py-1 text-sm ${
-                  t.id === playback?.currentTrackId
-                    ? "bg-zinc-100 font-medium text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100"
-                    : "text-zinc-700 dark:text-zinc-300"
+                onClick={() => setActivePanel("chat")}
+                className={`flex-1 px-4 py-2 text-sm font-medium ${
+                  activePanel === "chat"
+                    ? "bg-zinc-100 text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100"
+                    : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-900/50"
                 }`}
               >
-                <span className="truncate">
-                  {t.id === playback?.currentTrackId ? "▶ " : ""}
-                  {t.title}
-                </span>
-                <span className="ml-auto shrink-0 text-xs text-zinc-400">
-                  {t.addedBy}
-                </span>
-                <button
-                  onClick={() => removeTrack(t.id)}
-                  className="shrink-0 text-zinc-400 hover:text-red-600"
-                  title="Remove from queue"
-                >
-                  &times;
-                </button>
-              </li>
-            ))}
-            {queue.length === 0 && (
-              <li className="px-2 py-1 text-sm text-zinc-400">
-                Queue is empty.
-              </li>
-            )}
-          </ul>
-        </section>
-      </div>
-
-      <section className="flex flex-col rounded border border-zinc-200 dark:border-zinc-800">
-        <h2 className="border-b border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:text-zinc-300">
-          Chat
-        </h2>
-        <ul
-          ref={chatListRef}
-          className="h-48 flex-1 overflow-y-auto px-4 py-2 text-sm"
-        >
-          {chat.map((m) => (
-            <li key={m.id} className="py-0.5 text-zinc-800 dark:text-zinc-200">
-              <span
-                className={
-                  m.clientId === clientId
-                    ? "font-semibold text-zinc-950 dark:text-white"
-                    : "font-medium text-zinc-600 dark:text-zinc-400"
-                }
+                Chat
+              </button>
+              <button
+                onClick={() => setActivePanel("members")}
+                className={`flex-1 px-4 py-2 text-sm font-medium ${
+                  activePanel === "members"
+                    ? "bg-zinc-100 text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100"
+                    : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-900/50"
+                }`}
               >
-                {m.name}
-              </span>
-              <span className="text-zinc-400">
-                {" "}
-                {new Date(m.at).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </span>
-              : {m.text}
-            </li>
-          ))}
-          {chat.length === 0 && (
-            <li className="py-1 text-zinc-400">No messages yet — say hi.</li>
-          )}
-        </ul>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            const text = draft.trim();
-            if (text) {
-              sendChat(text);
-              setDraft("");
-            }
-          }}
-          className="flex gap-2 border-t border-zinc-200 p-2 dark:border-zinc-800"
-        >
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            maxLength={500}
-            placeholder="Type a message..."
-            className="w-full rounded border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-          />
-          <button
-            type="submit"
-            disabled={!draft.trim()}
-            className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
-          >
-            Send
-          </button>
-        </form>
-      </section>
+                People ({members.length})
+              </button>
+            </div>
+            {activePanel === "chat" ? (
+              <>
+                <ul
+                  ref={chatListRef}
+                  className="h-[40vh] max-h-80 overflow-y-auto px-4 py-2 text-sm sm:h-64"
+                >
+                  {chat.map((m) => (
+                    <li key={m.id} className="py-0.5 text-zinc-800 dark:text-zinc-200">
+                      <span
+                        className={
+                          m.clientId === clientId
+                            ? "font-semibold text-zinc-950 dark:text-white"
+                            : "font-medium text-zinc-600 dark:text-zinc-400"
+                        }
+                      >
+                        {m.name}
+                      </span>
+                      <span className="text-zinc-400">
+                        {" "}
+                        {new Date(m.at).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                      : {m.text}
+                    </li>
+                  ))}
+                  {chat.length === 0 && (
+                    <li className="py-1 text-zinc-400">No messages yet — say hi.</li>
+                  )}
+                </ul>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const text = draft.trim();
+                    if (text) {
+                      sendChat(text);
+                      setDraft("");
+                    }
+                  }}
+                  className="flex gap-2 border-t border-zinc-200 p-2 dark:border-zinc-800"
+                >
+                  <input
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    maxLength={500}
+                    placeholder="Type a message..."
+                    className="w-full rounded border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!draft.trim()}
+                    className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+                  >
+                    Send
+                  </button>
+                </form>
+              </>
+            ) : (
+              <ul className="h-[40vh] max-h-80 overflow-y-auto p-2 sm:h-64">
+                {members.map((m) => (
+                  <li
+                    key={m.clientId}
+                    className="px-2 py-1 text-sm text-zinc-800 dark:text-zinc-200"
+                  >
+                    {m.name}
+                    {m.clientId === clientId && (
+                      <span className="ml-1 text-xs text-zinc-400">(you)</span>
+                    )}
+                  </li>
+                ))}
+                {members.length === 0 && (
+                  <li className="px-2 py-1 text-sm text-zinc-400">No members.</li>
+                )}
+              </ul>
+            )}
+          </div>
+        </aside>
+      </div>
     </div>
   );
 }
