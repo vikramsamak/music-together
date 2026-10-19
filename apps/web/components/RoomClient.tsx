@@ -2,8 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import ShareRoom from "@/components/ShareRoom";
 import YouTubePlayer, { type PlayerHandle } from "@/components/YouTubePlayer";
+import { useMediaSession } from "@/hooks/useMediaSession";
 import { useRoomSocket } from "@/hooks/useRoomSocket";
+import { useWakeLock } from "@/hooks/useWakeLock";
 import { searchVideos, type SearchResult } from "@/lib/api";
 import { useGuestName, useStoredName } from "@/lib/name";
 import { formatTime, serverPosition } from "@/lib/playback";
@@ -61,6 +64,20 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   const serverNowRef = useRef(serverNow);
   const playing = playback?.playing ?? false;
   const currentTrack = queue.find((t) => t.id === playback?.currentTrackId);
+
+  useMediaSession({
+    track: currentTrack ?? null,
+    playback,
+    onPlay: play,
+    onPause: pause,
+    onNext: next,
+    onPrev: prev,
+    onSeek: (position) => {
+      seek(position);
+      playerRef.current?.seekTo(position);
+    },
+  });
+  useWakeLock(playing && status === "joined");
 
   useEffect(() => {
     serverNowRef.current = serverNow;
@@ -180,6 +197,7 @@ export default function RoomClient({ roomId }: { roomId: string }) {
           </button>
           {copied && <span className="ml-2 text-xs text-zinc-500">copied</span>}
         </h1>
+        <ShareRoom roomId={roomId} />
         <span className="ml-auto text-sm text-zinc-500">
           {status === "joined" && "connected"}
           {status === "connecting" && "connecting..."}

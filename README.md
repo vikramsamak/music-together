@@ -49,6 +49,22 @@ another browser and paste the room code.
 Note: browsers block audio until a user gesture, so a freshly queued track starts paused —
 press Play once in each tab.
 
+## PWA & sharing
+
+The web app is installable (manifest + generated icons + a production-only service worker)
+and shows an offline banner when the connection drops.
+
+- Install / service worker only run in a production build on a secure context:
+  `npm run build && npm run start -w web` (then install from the browser). A LAN IP over
+  plain HTTP is not a secure context — use `next dev --experimental-https` to test on a phone.
+- Every room link renders an OG preview (`/room/{CODE}/opengraph-image`); the room header's
+  **Share** button shows a QR code, copies the link, or opens the native share sheet.
+- **Background audio:** the YouTube embed cannot play in the background on mobile — YouTube
+  blocks it for non-Premium users and their developer policy forbids bypassing it. On phones
+  the app holds a screen Wake Lock while playing; desktop background tabs keep playing.
+- Set `NEXT_PUBLIC_SITE_URL` (e.g. `https://music.example`) in production so shared links and
+  OG images use absolute URLs.
+
 ## Quality checks
 
 ```bash
