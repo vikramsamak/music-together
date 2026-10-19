@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import YouTubePlayer, { type PlayerHandle } from "@/components/YouTubePlayer";
 import { useRoomSocket } from "@/hooks/useRoomSocket";
+import { searchVideos, type SearchResult } from "@/lib/api";
 import { useGuestName, useStoredName } from "@/lib/name";
 import { formatTime, serverPosition } from "@/lib/playback";
 
@@ -47,6 +48,10 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   const [copied, setCopied] = useState(false);
   const [draft, setDraft] = useState("");
   const [trackUrl, setTrackUrl] = useState("");
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [nowSec, setNowSec] = useState(0);
   const [duration, setDuration] = useState(0);
   const chatListRef = useRef<HTMLUListElement>(null);
@@ -136,6 +141,22 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   const commitSeek = (position: number) => {
     playerRef.current?.seekTo(position);
     seek(position);
+  };
+
+  const runSearch = async (event: FormEvent) => {
+    event.preventDefault();
+    const q = query.trim();
+    if (q.length < 2) return;
+    setSearching(true);
+    setSearchError(null);
+    try {
+      setResults(await searchVideos(q));
+    } catch {
+      setResults([]);
+      setSearchError("Search unavailable — paste a link instead.");
+    } finally {
+      setSearching(false);
+    }
   };
 
   return (
@@ -271,6 +292,52 @@ export default function RoomClient({ roomId }: { roomId: string }) {
                 Add
               </button>
             </form>
+            <form onSubmit={runSearch} className="flex gap-2">
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search YouTube..."
+                className="w-full rounded border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+              />
+              <button
+                type="submit"
+                disabled={query.trim().length < 2 || searching}
+                className="shrink-0 rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
+              >
+                {searching ? "..." : "Search"}
+              </button>
+            </form>
+            {searchError && (
+              <p className="text-xs text-zinc-500">{searchError}</p>
+            )}
+            {results.length > 0 && (
+              <ul className="max-h-48 overflow-y-auto rounded border border-zinc-200 dark:border-zinc-800">
+                {results.map((r) => (
+                  <li
+                    key={r.videoId}
+                    className="flex items-center gap-2 px-2 py-1 text-sm"
+                  >
+                    <span className="truncate text-zinc-700 dark:text-zinc-300">
+                      {r.title}
+                    </span>
+                    <span className="ml-auto shrink-0 text-xs text-zinc-400">
+                      {formatTime(r.durationSeconds)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        addTrack(`https://youtu.be/${r.videoId}`);
+                        setResults([]);
+                        setQuery("");
+                      }}
+                      className="shrink-0 rounded border border-zinc-300 px-2 py-0.5 text-xs text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
+                    >
+                      Add
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
             {errorCode && (
               <p className="text-xs text-red-600">
                 {ERRORS[errorCode] ?? "Something went wrong."}

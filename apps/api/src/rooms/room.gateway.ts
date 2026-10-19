@@ -385,7 +385,7 @@ export class RoomGateway {
       .emit('playback:update', { state, senderId, now: Date.now() });
   }
 
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
     const meta = this.socketMeta.get(client.id);
     this.socketMeta.delete(client.id);
     if (!meta) return;
@@ -397,7 +397,11 @@ export class RoomGateway {
       const members = this.memberList(meta.roomId);
       if (room.size === 0) {
         this.rooms.delete(meta.roomId);
-        void this.roomsService.expireEmptyRoom(meta.roomId);
+        try {
+          await this.roomsService.expireEmptyRoom(meta.roomId);
+        } catch (error) {
+          console.error('[rooms] expire failed', (error as Error).message);
+        }
       }
       this.server
         .to(`room:${meta.roomId}`)

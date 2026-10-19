@@ -28,10 +28,18 @@ Functional-first; UI is intentionally unstyled until later.
 npm run dev          # turbo: api (3001) + web (3000) in watch mode
 npm run build        # build both
 npm run lint
+npx turbo run typecheck
+npm run test -w api  # unit; test:e2e -w api needs Redis
 ```
 
 Single workspace: `npm run dev -w api` / `npm run dev -w web`.
-Single test: `npm run test -w api`.
+
+## REST
+
+- `POST /api/rooms` → `{ roomId }`
+- `GET /api/search?q=...` → `{ results: [{ videoId, title, durationSeconds, channel }] }`
+  (keyless YouTube scrape via `youtube-sr`; `503` when the scraper is blocked, and the
+  UI falls back to pasting a link)
 
 ## Redis keys
 
