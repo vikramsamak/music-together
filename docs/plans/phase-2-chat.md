@@ -6,10 +6,10 @@ Room members exchange messages; history persists in Redis and is restored on joi
 
 ## Tasks
 
-- [ ] API: `chat:send` handler — zod validation (max 500 chars), rate limit (~5 msg / 10 s per socket)
-- [ ] API: persist to `room:{id}:chat` (RPUSH + LTRIM 100); include last 100 in `joined` snapshot
-- [ ] API: broadcast `chat:new { id, clientId, name, text, at }`
-- [ ] Web: minimal chat panel (message list + input) on room page; render history from snapshot
+- [x] API: `chat:send` handler — zod validation (max 500 chars), rate limit (~5 msg / 10 s per socket)
+- [x] API: persist to `room:{id}:chat` (RPUSH + LTRIM 100); include last 100 in `joined` snapshot
+- [x] API: broadcast `chat:new { id, clientId, name, text, at }`
+- [x] Web: minimal chat panel (message list + input) on room page; render history from snapshot
 
 ## Protocol additions
 
@@ -17,7 +17,7 @@ Room members exchange messages; history persists in Redis and is restored on joi
 
 ## Verification
 
-- [ ] Two clients exchange messages in real time
-- [ ] Late joiner sees the last messages
-- [ ] Restart API → history still present (Redis)
-- [ ] Over-long / rapid messages rejected without server crash
+- [x] Two clients exchange messages in real time (`node scripts/chat-smoke.mjs`)
+- [x] Late joiner sees the last messages
+- [x] Restart API → history still present (Redis) (`node scripts/history-check.mjs write|read`)
+- [x] Over-long / rapid messages rejected without server crash

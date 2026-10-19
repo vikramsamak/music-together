@@ -25,12 +25,29 @@ export type ConnectionStatus =
   | "disconnected"
   | "error";
 
+export interface ChatMessage {
+  id: string;
+  clientId: string;
+  name: string;
+  text: string;
+  at: string;
+}
+
+const CHAT_CLIENT_CAP = 200;
+
 export function useRoomSocket(roomId: string, name: string | null) {
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [members, setMembers] = useState<Member[]>([]);
   const [room, setRoom] = useState<RoomInfo | null>(null);
+  const [chat, setChat] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
+
+  const sendChat = (text: string) => {
+    setErrorCode(null);
+    socketRef.current?.emit("chat:send", { text });
+  };
 
   useEffect(() => {
     if (!name) return;
@@ -45,23 +62,31 @@ export function useRoomSocket(roomId: string, name: string | null) {
     };
 
     socket.on("connect", join);
-    socket.on("joined", (data: { room: RoomInfo; members: Member[] }) => {
-      setRoom(data.room);
-      setMembers(data.members);
-      setError(null);
-      setStatus("joined");
-    });
+    socket.on(
+      "joined",
+      (data: { room: RoomInfo; members: Member[]; chat?: ChatMessage[] }) => {
+        setRoom(data.room);
+        setMembers(data.members);
+        setChat(data.chat ?? []);
+        setError(null);
+        setErrorCode(null);
+        setStatus("joined");
+      },
+    );
     socket.on("presence:update", (data: { members: Member[] }) => {
       setMembers(data.members);
+    });
+    socket.on("chat:new", (message: ChatMessage) => {
+      setChat((prev) => [...prev, message].slice(-CHAT_CLIENT_CAP));
     });
     socket.on("error", (data: { code?: string }) => {
       if (data?.code === "ROOM_NOT_FOUND") {
         setError("Room not found. Check the room code.");
         setStatus("error");
         socket.close();
-      } else {
-        setError("Something went wrong.");
+        return;
       }
+      setErrorCode(data?.code ?? "BAD_REQUEST");
     });
     socket.on("disconnect", () => {
       if (socket.active) setStatus("disconnected");
@@ -73,7 +98,16 @@ export function useRoomSocket(roomId: string, name: string | null) {
     };
   }, [roomId, name]);
 
-  return { status, members, room, error, clientId: getClientIdSafe() };
+  return {
+    status,
+    members,
+    room,
+    chat,
+    error,
+    errorCode,
+    sendChat,
+    clientId: getClientIdSafe(),
+  };
 }
 
 function getClientIdSafe(): string | null {

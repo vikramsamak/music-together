@@ -14,6 +14,16 @@ export interface RoomState {
   version: string;
 }
 
+export interface ChatMessage {
+  id: string;
+  clientId: string;
+  name: string;
+  text: string;
+  at: string;
+}
+
+const CHAT_LIMIT = 100;
+
 @Injectable()
 export class RoomsService {
   constructor(@Inject('REDIS_CLIENT') private readonly redis: Redis) {}
@@ -56,6 +66,27 @@ export class RoomsService {
 
   async touchRoom(roomId: string): Promise<void> {
     await this.redis.expire(`room:${roomId}`, ROOM_TTL_SECONDS);
+  }
+
+  async getChat(roomId: string): Promise<ChatMessage[]> {
+    const rows = await this.redis.lrange(`room:${roomId}:chat`, 0, -1);
+    const messages: ChatMessage[] = [];
+    for (const row of rows) {
+      try {
+        messages.push(JSON.parse(row) as ChatMessage);
+      } catch {
+        // skip corrupt rows
+      }
+    }
+    return messages;
+  }
+
+  async appendChat(roomId: string, message: ChatMessage): Promise<void> {
+    await this.redis
+      .multi()
+      .rpush(`room:${roomId}:chat`, JSON.stringify(message))
+      .ltrim(`room:${roomId}:chat`, -CHAT_LIMIT, -1)
+      .exec();
   }
 }
 

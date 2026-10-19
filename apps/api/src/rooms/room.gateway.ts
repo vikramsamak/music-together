@@ -8,7 +8,8 @@ import {
 } from '@nestjs/websockets';
 import { Redis } from 'ioredis';
 import { Server, Socket } from 'socket.io';
-import { RoomsService } from './rooms.service';
+import { z } from 'zod';
+import { ChatMessage, RoomsService } from './rooms.service';
 
 export interface Member {
   clientId: string;
@@ -16,6 +17,10 @@ export interface Member {
 }
 
 const MAX_NAME_LENGTH = 24;
+const RATE_LIMIT_WINDOW_MS = 10_000;
+const RATE_LIMIT_MAX = 5;
+
+const chatSendSchema = z.object({ text: z.string().trim().min(1).max(500) });
 
 @Injectable()
 @WebSocketGateway()
@@ -26,7 +31,11 @@ export class RoomGateway {
     string,
     Map<string, { name: string; socketId: string }>
   >();
-  private socketMeta = new Map<string, { roomId: string; clientId: string }>();
+  private socketMeta = new Map<
+    string,
+    { roomId: string; clientId: string; name: string }
+  >();
+  private chatTimestamps = new Map<string, number[]>();
 
   constructor(
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
@@ -54,9 +63,10 @@ export class RoomGateway {
     }
 
     await client.join(`room:${roomId}`);
-    this.socketMeta.set(client.id, { roomId, clientId });
+    this.socketMeta.set(client.id, { roomId, clientId, name });
 
     const members = this.addMember(roomId, clientId, name, client.id);
+    const chat = await this.roomsService.getChat(roomId);
     await this.roomsService.touchRoom(roomId);
     this.server.to(`room:${roomId}`).emit('presence:update', { members });
 
@@ -74,9 +84,38 @@ export class RoomGateway {
         },
         members,
         queue: [],
-        chat: [],
+        chat,
       },
     };
+  }
+
+  @SubscribeMessage('chat:send')
+  async chatSend(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: unknown,
+  ) {
+    const meta = this.socketMeta.get(client.id);
+    if (!meta) {
+      return { event: 'error', data: { code: 'NOT_JOINED' } };
+    }
+    const parsed = chatSendSchema.safeParse(body);
+    if (!parsed.success) {
+      return { event: 'error', data: { code: 'BAD_REQUEST' } };
+    }
+    if (this.isRateLimited(meta.clientId)) {
+      return { event: 'error', data: { code: 'RATE_LIMITED' } };
+    }
+
+    const message: ChatMessage = {
+      id: crypto.randomUUID(),
+      clientId: meta.clientId,
+      name: meta.name,
+      text: parsed.data.text,
+      at: new Date().toISOString(),
+    };
+    await this.roomsService.appendChat(meta.roomId, message);
+    this.server.to(`room:${meta.roomId}`).emit('chat:new', message);
+    return { event: 'chat:sent', data: { id: message.id } };
   }
 
   handleDisconnect(client: Socket) {
@@ -94,6 +133,21 @@ export class RoomGateway {
         .to(`room:${meta.roomId}`)
         .emit('presence:update', { members });
     }
+  }
+
+  private isRateLimited(key: string): boolean {
+    const now = Date.now();
+    const windowStart = now - RATE_LIMIT_WINDOW_MS;
+    const timestamps = (this.chatTimestamps.get(key) ?? []).filter(
+      (t) => t > windowStart,
+    );
+    if (timestamps.length >= RATE_LIMIT_MAX) {
+      this.chatTimestamps.set(key, timestamps);
+      return true;
+    }
+    timestamps.push(now);
+    this.chatTimestamps.set(key, timestamps);
+    return false;
   }
 
   private addMember(
