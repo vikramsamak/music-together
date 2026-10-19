@@ -12,66 +12,80 @@ export interface PlayerHandle {
   getCurrentTime(): number;
   getDuration(): number;
   isPlaying(): boolean;
+  isReady(): boolean;
 }
 
-const YouTubePlayer = forwardRef<PlayerHandle, { onEnded: () => void }>(
-  function YouTubePlayer({ onEnded }, ref) {
-    const hostRef = useRef<HTMLDivElement>(null);
-    const elementIdRef = useRef(
-      `yt-player-${Math.random().toString(36).slice(2, 10)}`,
-    );
-    const playerRef = useRef<YTPlayer | null>(null);
-    const endedRef = useRef(onEnded);
+const YouTubePlayer = forwardRef<
+  PlayerHandle,
+  { onEnded: () => void; onReady?: () => void }
+>(function YouTubePlayer({ onEnded, onReady }, ref) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const elementIdRef = useRef(
+    `yt-player-${Math.random().toString(36).slice(2, 10)}`,
+  );
+  const playerRef = useRef<YTPlayer | null>(null);
+  const readyRef = useRef(false);
+  const endedRef = useRef(onEnded);
+  const onReadyRef = useRef(onReady);
 
-    useEffect(() => {
-      endedRef.current = onEnded;
-    }, [onEnded]);
+  useEffect(() => {
+    endedRef.current = onEnded;
+    onReadyRef.current = onReady;
+  }, [onEnded, onReady]);
 
-    useEffect(() => {
-      let cancelled = false;
-      void loadYouTubeApi().then((YT) => {
-        if (cancelled || !hostRef.current) return;
-        playerRef.current = new YT.Player(elementIdRef.current, {
-          width: "100%",
-          height: "100%",
-          playerVars: { playsinline: 1, rel: 0 },
-          events: {
-            onStateChange: (event) => {
-              if (event.data === ENDED) endedRef.current();
-            },
+  useEffect(() => {
+    let cancelled = false;
+    void loadYouTubeApi().then((YT) => {
+      if (cancelled || !hostRef.current) return;
+      playerRef.current = new YT.Player(elementIdRef.current, {
+        width: "100%",
+        height: "100%",
+        playerVars: { playsinline: 1, rel: 0 },
+        events: {
+          onReady: () => {
+            readyRef.current = true;
+            onReadyRef.current?.();
           },
-        });
+          onStateChange: (event) => {
+            if (event.data === ENDED) endedRef.current();
+          },
+        },
       });
-      return () => {
-        cancelled = true;
-        playerRef.current?.destroy();
-        playerRef.current = null;
-      };
-    }, []);
+    });
+    return () => {
+      cancelled = true;
+      readyRef.current = false;
+      playerRef.current?.destroy();
+      playerRef.current = null;
+    };
+  }, []);
 
-    useImperativeHandle(
-      ref,
-      () => ({
+  useImperativeHandle(
+    ref,
+    () => {
+      const active = () => (readyRef.current ? playerRef.current : null);
+      return {
         load: (videoId, startSeconds = 0) =>
-          playerRef.current?.loadVideoById({ videoId, startSeconds }),
+          active()?.loadVideoById({ videoId, startSeconds }),
         cue: (videoId, startSeconds = 0) =>
-          playerRef.current?.cueVideoById({ videoId, startSeconds }),
-        play: () => playerRef.current?.playVideo(),
-        pause: () => playerRef.current?.pauseVideo(),
-        seekTo: (seconds) => playerRef.current?.seekTo(seconds, true),
-        getCurrentTime: () => playerRef.current?.getCurrentTime() ?? 0,
-        getDuration: () => playerRef.current?.getDuration() ?? 0,
-        isPlaying: () => playerRef.current?.getPlayerState() === 1,
-      }),
-      [],
-    );
+          active()?.cueVideoById({ videoId, startSeconds }),
+        play: () => active()?.playVideo(),
+        pause: () => active()?.pauseVideo(),
+        seekTo: (seconds) => active()?.seekTo(seconds, true),
+        getCurrentTime: () => active()?.getCurrentTime() ?? 0,
+        getDuration: () => active()?.getDuration() ?? 0,
+        isPlaying: () => active()?.getPlayerState() === 1,
+        isReady: () => readyRef.current,
+      };
+    },
+    [],
+  );
 
-    return (
-      <div ref={hostRef} className="aspect-video w-full bg-black">
-        <div id={elementIdRef.current} className="h-full w-full" />
-      </div>
-    );
-  },
-);
+  return (
+    <div ref={hostRef} className="aspect-video w-full bg-black">
+      <div id={elementIdRef.current} className="h-full w-full" />
+    </div>
+  );
+});
 
 export default YouTubePlayer;

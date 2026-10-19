@@ -54,6 +54,7 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [nowSec, setNowSec] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [playerReady, setPlayerReady] = useState(false);
   const chatListRef = useRef<HTMLUListElement>(null);
   const playerRef = useRef<PlayerHandle | null>(null);
   const loadedVideoIdRef = useRef<string | null>(null);
@@ -71,7 +72,7 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   }, [chat]);
 
   useEffect(() => {
-    if (!playbackEvent) return;
+    if (!playbackEvent || !playerReady) return;
     const player = playerRef.current;
     if (!player) return;
     const state = playbackEvent.state;
@@ -91,10 +92,10 @@ export default function RoomClient({ roomId }: { roomId: string }) {
     }
     if (state.playing && !player.isPlaying()) player.play();
     if (!state.playing && player.isPlaying()) player.pause();
-  }, [playbackEvent]);
+  }, [playbackEvent, playerReady]);
 
   useEffect(() => {
-    if (status !== "joined") return;
+    if (status !== "joined" || !playerReady) return;
     const timer = setInterval(() => {
       const player = playerRef.current;
       const state = playbackRef.current;
@@ -111,10 +112,10 @@ export default function RoomClient({ roomId }: { roomId: string }) {
       }
     }, 5000);
     return () => clearInterval(timer);
-  }, [status, playbackRef]);
+  }, [status, playbackRef, playerReady]);
 
   useEffect(() => {
-    if (status !== "joined") return;
+    if (status !== "joined" || !playerReady) return;
     const timer = setInterval(() => {
       const player = playerRef.current;
       if (!player) return;
@@ -122,7 +123,7 @@ export default function RoomClient({ roomId }: { roomId: string }) {
       setDuration(player.getDuration());
     }, 1000);
     return () => clearInterval(timer);
-  }, [status]);
+  }, [status, playerReady]);
 
   if (!name) {
     return <div className="p-8 text-zinc-500">Loading...</div>;
@@ -215,6 +216,7 @@ export default function RoomClient({ roomId }: { roomId: string }) {
           </h2>
           <YouTubePlayer
             ref={playerRef}
+            onReady={() => setPlayerReady(true)}
             onEnded={() => {
               const state = playbackRef.current;
               if (state?.currentVideoId) {
