@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import OfflineBanner from "@/components/OfflineBanner";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
+import { SITE_URL } from "@/lib/config";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -17,9 +18,7 @@ const geistMono = Geist_Mono({
 const description = "Listen to YouTube Music together in a room";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(
-    process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
-  ),
+  metadataBase: new URL(SITE_URL),
   title: {
     default: "music-together",
     template: "%s · music-together",

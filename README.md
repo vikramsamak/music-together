@@ -21,10 +21,11 @@ and [`docs/plans/`](docs/plans) for the phase-by-phase build plan.
 
 ```bash
 npm install
-cp apps/api/.env.example apps/api/.env   # PowerShell: Copy-Item apps/api/.env.example apps/api/.env
+cp apps/api/.env.example apps/api/.env.local   # PowerShell: Copy-Item apps/api/.env.example apps/api/.env.local
+cp apps/web/.env.example apps/web/.env.local
 ```
 
-`apps/api/.env`:
+`apps/api/.env.local`:
 
 ```
 PORT=3001
@@ -32,8 +33,16 @@ REDIS_URL=redis://127.0.0.1:6379
 WEB_ORIGIN=http://localhost:3000
 ```
 
-The web app defaults to `http://localhost:3001` for the API; override with
-`NEXT_PUBLIC_API_URL` if needed.
+`apps/web/.env.local`:
+
+```
+NEXT_PUBLIC_API_URL=http://localhost:3001
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+```
+
+The API loads `.env.local` then `.env` (first match wins) and validates these vars at
+startup. Both `.env.local` files are gitignored; the `.env.example` files are the committed
+templates.
 
 ## Run
 

@@ -35,4 +35,5 @@ Architecture decisions and the WS protocol: `docs/plans/README.md`. Implement th
 - YouTube IFrame player methods (`getCurrentTime`, `loadVideoById`, …) only exist after the player fires `onReady`; calling them on the constructor stub throws `... is not a function`. `YouTubePlayer` gates the handle behind a `readyRef` (exposing `isReady()`), and `RoomClient` waits for `playerReady` before applying playback state or starting its timers.
 - Next docs ship in `node_modules/next/dist/docs/` (hoisted to the repo root after workspaces were added).
 - Room state: Redis keys `room:{id}`, `room:{id}:queue`, `room:{id}:chat`. Presence is in-memory per API process (single instance).
-- The web build runs on Port 3000 and the api on 3001 — socket.io CORS is configured for `WEB_ORIGIN` (`.env` in `apps/api`).
+- Config lives in `.env.local` (gitignored, copied from `.env.example`; both apps). The api's `ConfigModule.forRoot` reads `.env.local` then `.env` (`envFilePath`, first match wins) and Zod-validates `PORT`/`REDIS_URL`/`WEB_ORIGIN`; the web reads `NEXT_PUBLIC_API_URL`/`NEXT_PUBLIC_SITE_URL` via `apps/web/lib/config.ts`. `apps/web/.gitignore` ignores `.env*` except `.env.example`.
+- The web build runs on Port 3000 and the api on 3001 — socket.io CORS is configured for `WEB_ORIGIN` (`.env.local` in `apps/api`).
