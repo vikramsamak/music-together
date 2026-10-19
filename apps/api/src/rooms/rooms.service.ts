@@ -42,6 +42,8 @@ export interface PlaybackState {
 }
 
 const CHAT_LIMIT = 100;
+const QUEUE_LIMIT = 50;
+const EMPTY_ROOM_TTL_SECONDS = 30 * 60;
 
 @Injectable()
 export class RoomsService {
@@ -85,7 +87,22 @@ export class RoomsService {
   }
 
   async touchRoom(roomId: string): Promise<void> {
-    await this.redis.expire(`room:${roomId}`, ROOM_TTL_SECONDS);
+    await this.redis
+      .multi()
+      .expire(`room:${roomId}`, ROOM_TTL_SECONDS)
+      .expire(`room:${roomId}:queue`, ROOM_TTL_SECONDS)
+      .expire(`room:${roomId}:chat`, ROOM_TTL_SECONDS)
+      .exec();
+  }
+
+  /** Called when the last member leaves: reaping keys after a grace period. */
+  async expireEmptyRoom(roomId: string): Promise<void> {
+    await this.redis
+      .multi()
+      .expire(`room:${roomId}`, EMPTY_ROOM_TTL_SECONDS)
+      .expire(`room:${roomId}:queue`, EMPTY_ROOM_TTL_SECONDS)
+      .expire(`room:${roomId}:chat`, EMPTY_ROOM_TTL_SECONDS)
+      .exec();
   }
 
   async getChat(roomId: string): Promise<ChatMessage[]> {
@@ -106,6 +123,7 @@ export class RoomsService {
       .multi()
       .rpush(`room:${roomId}:chat`, JSON.stringify(message))
       .ltrim(`room:${roomId}:chat`, -CHAT_LIMIT, -1)
+      .expire(`room:${roomId}:chat`, ROOM_TTL_SECONDS)
       .exec();
   }
 
@@ -122,9 +140,16 @@ export class RoomsService {
     return tracks;
   }
 
-  async addTrack(roomId: string, track: Track): Promise<Track[]> {
-    await this.redis.rpush(`room:${roomId}:queue`, JSON.stringify(track));
-    return this.getQueue(roomId);
+  /** Returns the updated queue, or null when the queue is full. */
+  async addTrack(roomId: string, track: Track): Promise<Track[] | null> {
+    const current = await this.getQueue(roomId);
+    if (current.length >= QUEUE_LIMIT) return null;
+    await this.redis
+      .multi()
+      .rpush(`room:${roomId}:queue`, JSON.stringify(track))
+      .expire(`room:${roomId}:queue`, ROOM_TTL_SECONDS)
+      .exec();
+    return [...current, track];
   }
 
   async removeTrack(roomId: string, trackId: string): Promise<Track[]> {
@@ -136,6 +161,7 @@ export class RoomsService {
     if (tracks.length > 0) {
       pipeline.rpush(key, ...tracks.map((t) => JSON.stringify(t)));
     }
+    pipeline.expire(key, ROOM_TTL_SECONDS);
     await pipeline.exec();
     return tracks;
   }

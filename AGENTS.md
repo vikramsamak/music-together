@@ -13,7 +13,7 @@ Architecture decisions and the WS protocol: `docs/plans/README.md`. Implement th
 - `npm run dev` / `npm run build` / `npm run lint` — turbo, both apps
 - Single workspace: `npm run dev -w api` / `npm run dev -w web`
 - API tests: `npm run test -w api`
-- Smoke tests: start the api, then `node scripts/ws-smoke.mjs` (presence), `node scripts/chat-smoke.mjs` (chat), `node scripts/playback-smoke.mjs` (queue + sync); `node scripts/history-check.mjs write|read` needs an api restart between the two
+- Smoke tests: start the api, then `node scripts/ws-smoke.mjs` (presence), `node scripts/chat-smoke.mjs` (chat), `node scripts/playback-smoke.mjs` (queue + sync), `node scripts/robustness-smoke.mjs` (frames/caps/TTL/lock); `node scripts/history-check.mjs write|read` needs an api restart between the two; `node scripts/restart-smoke.mjs` manages its own api on :3005
 - Redis must be running or the api's Redis client logs errors; create-room/join will fail
 
 ## Gotchas

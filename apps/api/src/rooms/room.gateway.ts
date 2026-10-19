@@ -22,11 +22,22 @@ export interface Member {
   name: string;
 }
 
+interface SocketMeta {
+  roomId: string;
+  clientId: string;
+  name: string;
+}
+
 const MAX_NAME_LENGTH = 24;
 const RATE_LIMIT_WINDOW_MS = 10_000;
 const RATE_LIMIT_MAX = 5;
 
 const chatSendSchema = z.object({ text: z.string().trim().min(1).max(500) });
+const joinSchema = z.object({
+  roomId: z.string().min(1).max(16),
+  name: z.string().max(200).optional(),
+  clientId: z.string().min(1).max(64),
+});
 const queueAddSchema = z.object({ url: z.string().trim().min(1).max(500) });
 const queueRemoveSchema = z.object({ trackId: z.string().min(1).max(64) });
 const seekSchema = z.object({
@@ -50,11 +61,9 @@ export class RoomGateway {
     string,
     Map<string, { name: string; socketId: string }>
   >();
-  private socketMeta = new Map<
-    string,
-    { roomId: string; clientId: string; name: string }
-  >();
+  private socketMeta = new Map<string, SocketMeta>();
   private chatTimestamps = new Map<string, number[]>();
+  private roomLocks = new Map<string, Promise<void>>();
 
   constructor(
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
@@ -62,18 +71,16 @@ export class RoomGateway {
   ) {}
 
   @SubscribeMessage('join')
-  async join(
-    @ConnectedSocket() client: Socket,
-    @MessageBody()
-    body: { roomId?: string; name?: string; clientId?: string },
-  ) {
-    const roomId =
-      typeof body?.roomId === 'string' ? body.roomId.toUpperCase() : '';
-    const clientId =
-      typeof body?.clientId === 'string' ? body.clientId.slice(0, 64) : '';
-    const name = sanitizeName(body?.name);
+  async join(@ConnectedSocket() client: Socket, @MessageBody() body: unknown) {
+    const parsed = joinSchema.safeParse(body);
+    if (!parsed.success) {
+      return { event: 'error', data: { code: 'BAD_REQUEST' } };
+    }
+    const roomId = parsed.data.roomId.toUpperCase();
+    const clientId = parsed.data.clientId;
+    const name = sanitizeName(parsed.data.name);
 
-    if (!/^[A-Z0-9]{6}$/.test(roomId) || !clientId) {
+    if (!/^[A-Z0-9]{6}$/.test(roomId)) {
       return { event: 'error', data: { code: 'BAD_REQUEST' } };
     }
     const room = await this.roomsService.getRoom(roomId);
@@ -149,28 +156,33 @@ export class RoomGateway {
     }
 
     const title = await fetchVideoTitle(videoId);
-    const track: Track = {
-      id: crypto.randomUUID(),
-      videoId,
-      url: `https://www.youtube.com/watch?v=${videoId}`,
-      title,
-      addedBy: meta.name,
-      addedAt: new Date().toISOString(),
-    };
-    const queue = await this.roomsService.addTrack(meta.roomId, track);
-    this.emitQueue(meta.roomId, queue);
+    return this.withRoomLock(meta.roomId, async () => {
+      const track: Track = {
+        id: crypto.randomUUID(),
+        videoId,
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+        title,
+        addedBy: meta.name,
+        addedAt: new Date().toISOString(),
+      };
+      const queue = await this.roomsService.addTrack(meta.roomId, track);
+      if (!queue) {
+        return { event: 'error', data: { code: 'QUEUE_FULL' } };
+      }
+      this.emitQueue(meta.roomId, queue);
 
-    const state = await this.roomsService.getPlayback(meta.roomId);
-    if (!state.currentVideoId) {
-      const next = await this.roomsService.setPlayback(meta.roomId, {
-        currentVideoId: track.videoId,
-        currentTrackId: track.id,
-        position: 0,
-        playing: false,
-      });
-      this.emitPlayback(meta.roomId, next, meta.clientId);
-    }
-    return { event: 'queue:added', data: { trackId: track.id } };
+      const state = await this.roomsService.getPlayback(meta.roomId);
+      if (!state.currentVideoId) {
+        const next = await this.roomsService.setPlayback(meta.roomId, {
+          currentVideoId: track.videoId,
+          currentTrackId: track.id,
+          position: 0,
+          playing: false,
+        });
+        this.emitPlayback(meta.roomId, next, meta.clientId);
+      }
+      return { event: 'queue:added', data: { trackId: track.id } };
+    });
   }
 
   @SubscribeMessage('queue:remove')
@@ -185,43 +197,45 @@ export class RoomGateway {
       return { event: 'error', data: { code: 'BAD_REQUEST' } };
     }
 
-    const before = await this.roomsService.getQueue(meta.roomId);
-    const idx = before.findIndex((t) => t.id === parsed.data.trackId);
-    if (idx === -1) return;
-    const successor = before[idx + 1] ?? null;
-    const queue = await this.roomsService.removeTrack(
-      meta.roomId,
-      parsed.data.trackId,
-    );
-    this.emitQueue(meta.roomId, queue);
+    return this.withRoomLock(meta.roomId, async () => {
+      const before = await this.roomsService.getQueue(meta.roomId);
+      const idx = before.findIndex((t) => t.id === parsed.data.trackId);
+      if (idx === -1) return;
+      const successor = before[idx + 1] ?? null;
+      const queue = await this.roomsService.removeTrack(
+        meta.roomId,
+        parsed.data.trackId,
+      );
+      this.emitQueue(meta.roomId, queue);
 
-    const state = await this.roomsService.getPlayback(meta.roomId);
-    if (state.currentTrackId === parsed.data.trackId) {
-      const next = successor
-        ? await this.roomsService.setPlayback(meta.roomId, {
-            currentVideoId: successor.videoId,
-            currentTrackId: successor.id,
-            position: 0,
-            playing: state.playing,
-          })
-        : await this.roomsService.setPlayback(meta.roomId, {
-            currentVideoId: '',
-            currentTrackId: '',
-            position: 0,
-            playing: false,
-          });
-      this.emitPlayback(meta.roomId, next, meta.clientId);
-    }
+      const state = await this.roomsService.getPlayback(meta.roomId);
+      if (state.currentTrackId === parsed.data.trackId) {
+        const next = successor
+          ? await this.roomsService.setPlayback(meta.roomId, {
+              currentVideoId: successor.videoId,
+              currentTrackId: successor.id,
+              position: 0,
+              playing: state.playing,
+            })
+          : await this.roomsService.setPlayback(meta.roomId, {
+              currentVideoId: '',
+              currentTrackId: '',
+              position: 0,
+              playing: false,
+            });
+        this.emitPlayback(meta.roomId, next, meta.clientId);
+      }
+    });
   }
 
   @SubscribeMessage('player:play')
   async playerPlay(@ConnectedSocket() client: Socket) {
-    return this.setPlaying(client, true);
+    return this.lockedPlaying(client, true);
   }
 
   @SubscribeMessage('player:pause')
   async playerPause(@ConnectedSocket() client: Socket) {
-    return this.setPlaying(client, false);
+    return this.lockedPlaying(client, false);
   }
 
   @SubscribeMessage('player:seek')
@@ -235,22 +249,24 @@ export class RoomGateway {
     if (!parsed.success) {
       return { event: 'error', data: { code: 'BAD_REQUEST' } };
     }
-    const state = await this.roomsService.getPlayback(meta.roomId);
-    if (!state.currentVideoId) return;
-    const next = await this.roomsService.setPlayback(meta.roomId, {
-      position: parsed.data.position,
+    return this.withRoomLock(meta.roomId, async () => {
+      const state = await this.roomsService.getPlayback(meta.roomId);
+      if (!state.currentVideoId) return;
+      const next = await this.roomsService.setPlayback(meta.roomId, {
+        position: parsed.data.position,
+      });
+      this.emitPlayback(meta.roomId, next, meta.clientId);
     });
-    this.emitPlayback(meta.roomId, next, meta.clientId);
   }
 
   @SubscribeMessage('player:next')
   async playerNext(@ConnectedSocket() client: Socket) {
-    return this.advance(client, 1);
+    return this.lockedAdvance(client, 1);
   }
 
   @SubscribeMessage('player:prev')
   async playerPrev(@ConnectedSocket() client: Socket) {
-    return this.advance(client, -1);
+    return this.lockedAdvance(client, -1);
   }
 
   @SubscribeMessage('player:ended')
@@ -263,33 +279,45 @@ export class RoomGateway {
     const parsed = endedSchema.safeParse(body);
     if (!parsed.success) return;
 
-    const state = await this.roomsService.getPlayback(meta.roomId);
-    if (
-      state.currentVideoId !== parsed.data.videoId ||
-      state.version !== parsed.data.version
-    ) {
-      return;
-    }
-    const queue = await this.roomsService.getQueue(meta.roomId);
-    const idx = queue.findIndex((t) => t.id === state.currentTrackId);
-    const successor = queue[idx + 1];
-    const next = successor
-      ? await this.roomsService.setPlayback(meta.roomId, {
-          currentVideoId: successor.videoId,
-          currentTrackId: successor.id,
-          position: 0,
-          playing: true,
-        })
-      : await this.roomsService.setPlayback(meta.roomId, {
-          playing: false,
-          position: livePosition(state),
-        });
-    this.emitPlayback(meta.roomId, next, meta.clientId);
+    return this.withRoomLock(meta.roomId, async () => {
+      const state = await this.roomsService.getPlayback(meta.roomId);
+      if (
+        state.currentVideoId !== parsed.data.videoId ||
+        state.version !== parsed.data.version
+      ) {
+        return;
+      }
+      const queue = await this.roomsService.getQueue(meta.roomId);
+      const idx = queue.findIndex((t) => t.id === state.currentTrackId);
+      const successor = queue[idx + 1];
+      const next = successor
+        ? await this.roomsService.setPlayback(meta.roomId, {
+            currentVideoId: successor.videoId,
+            currentTrackId: successor.id,
+            position: 0,
+            playing: true,
+          })
+        : await this.roomsService.setPlayback(meta.roomId, {
+            playing: false,
+            position: livePosition(state),
+          });
+      this.emitPlayback(meta.roomId, next, meta.clientId);
+    });
   }
 
-  private async setPlaying(client: Socket, playing: boolean) {
+  private lockedPlaying(client: Socket, playing: boolean) {
     const meta = this.socketMeta.get(client.id);
     if (!meta) return { event: 'error', data: { code: 'NOT_JOINED' } };
+    return this.withRoomLock(meta.roomId, () => this.setPlaying(meta, playing));
+  }
+
+  private lockedAdvance(client: Socket, dir: 1 | -1) {
+    const meta = this.socketMeta.get(client.id);
+    if (!meta) return { event: 'error', data: { code: 'NOT_JOINED' } };
+    return this.withRoomLock(meta.roomId, () => this.advance(meta, dir));
+  }
+
+  private async setPlaying(meta: SocketMeta, playing: boolean) {
     const state = await this.roomsService.getPlayback(meta.roomId);
     if (!state.currentVideoId) return;
     const next = await this.roomsService.setPlayback(meta.roomId, {
@@ -299,9 +327,7 @@ export class RoomGateway {
     this.emitPlayback(meta.roomId, next, meta.clientId);
   }
 
-  private async advance(client: Socket, dir: 1 | -1) {
-    const meta = this.socketMeta.get(client.id);
-    if (!meta) return { event: 'error', data: { code: 'NOT_JOINED' } };
+  private async advance(meta: SocketMeta, dir: 1 | -1) {
     const [queue, state] = await Promise.all([
       this.roomsService.getQueue(meta.roomId),
       this.roomsService.getPlayback(meta.roomId),
@@ -327,6 +353,24 @@ export class RoomGateway {
     this.emitPlayback(meta.roomId, next, meta.clientId);
   }
 
+  /**
+   * Serializes read-modify-write commands per room so concurrent clients
+   * cannot both apply the same transition (e.g. two ENDED reports).
+   */
+  private withRoomLock<T>(roomId: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.roomLocks.get(roomId) ?? Promise.resolve();
+    const run = previous.then(fn, fn);
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.roomLocks.set(roomId, tail);
+    void tail.then(() => {
+      if (this.roomLocks.get(roomId) === tail) this.roomLocks.delete(roomId);
+    });
+    return run;
+  }
+
   private emitQueue(roomId: string, queue: Track[]) {
     this.server.to(`room:${roomId}`).emit('queue:update', { queue });
   }
@@ -350,8 +394,11 @@ export class RoomGateway {
     const member = room?.get(meta.clientId);
     if (room && member?.socketId === client.id) {
       room.delete(meta.clientId);
-      if (room.size === 0) this.rooms.delete(meta.roomId);
       const members = this.memberList(meta.roomId);
+      if (room.size === 0) {
+        this.rooms.delete(meta.roomId);
+        void this.roomsService.expireEmptyRoom(meta.roomId);
+      }
       this.server
         .to(`room:${meta.roomId}`)
         .emit('presence:update', { members });

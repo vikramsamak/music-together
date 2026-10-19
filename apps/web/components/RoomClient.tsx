@@ -9,9 +9,11 @@ import { formatTime, serverPosition } from "@/lib/playback";
 
 const ERRORS: Record<string, string> = {
   RATE_LIMITED: "You're sending messages too fast — wait a moment.",
-  BAD_REQUEST: "Message must be 1-500 characters.",
+  BAD_REQUEST: "That request wasn't valid.",
   NOT_JOINED: "Not connected to the room yet.",
   BAD_VIDEO: "That doesn't look like a YouTube link.",
+  QUEUE_FULL: "The queue is full (50 tracks).",
+  INTERNAL: "Server hiccup — try again.",
 };
 
 const DRIFT_TOLERANCE_S = 2;
