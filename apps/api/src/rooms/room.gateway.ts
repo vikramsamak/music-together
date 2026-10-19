@@ -106,6 +106,7 @@ export class RoomGateway {
         queue,
         playback,
         chat,
+        now: Date.now(),
       },
     };
   }
@@ -295,7 +296,9 @@ export class RoomGateway {
             currentVideoId: successor.videoId,
             currentTrackId: successor.id,
             position: 0,
-            playing: true,
+            // Keep the room's play/pause flag: a late ENDED report arriving
+            // while the room is paused must not start the next track.
+            playing: state.playing,
           })
         : await this.roomsService.setPlayback(meta.roomId, {
             playing: false,

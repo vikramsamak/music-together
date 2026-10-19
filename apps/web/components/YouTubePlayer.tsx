@@ -12,6 +12,7 @@ export interface PlayerHandle {
   getCurrentTime(): number;
   getDuration(): number;
   isPlaying(): boolean;
+  isEnded(): boolean;
   isReady(): boolean;
 }
 
@@ -75,6 +76,7 @@ const YouTubePlayer = forwardRef<
         getCurrentTime: () => active()?.getCurrentTime() ?? 0,
         getDuration: () => active()?.getDuration() ?? 0,
         isPlaying: () => active()?.getPlayerState() === 1,
+        isEnded: () => active()?.getPlayerState() === ENDED,
         isReady: () => readyRef.current,
       };
     },

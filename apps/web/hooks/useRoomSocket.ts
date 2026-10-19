@@ -125,12 +125,13 @@ export function useRoomSocket(roomId: string, name: string | null) {
         chat?: ChatMessage[];
         queue?: Track[];
         playback?: PlaybackState;
+        now?: number;
       }) => {
         setRoom(data.room);
         setMembers(data.members);
         setChat(data.chat ?? []);
         setQueue(data.queue ?? []);
-        if (data.playback) applyPlayback(data.playback, null);
+        if (data.playback) applyPlayback(data.playback, null, data.now);
         setError(null);
         setErrorCode(null);
         setStatus("joined");

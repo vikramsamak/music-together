@@ -21,6 +21,10 @@ const ERRORS: Record<string, string> = {
 };
 
 const DRIFT_TOLERANCE_S = 2;
+// Only report a genuine end of the video: a premature ENDED (past-end seek,
+// clock skew, another client running fast) would end the track early or pause
+// the whole room.
+const ENDED_GUARD_S = 2;
 
 export default function RoomClient({ roomId }: { roomId: string }) {
   const stored = useStoredName();
@@ -94,39 +98,107 @@ export default function RoomClient({ roomId }: { roomId: string }) {
     const player = playerRef.current;
     if (!player) return;
     const state = playbackEvent.state;
-    const target = serverPosition(state, serverNowRef.current());
 
     if (!state.currentVideoId) {
       loadedVideoIdRef.current = null;
       player.pause();
       return;
     }
+
+    const rawTarget = serverPosition(state, serverNowRef.current());
+
     if (loadedVideoIdRef.current !== state.currentVideoId) {
       loadedVideoIdRef.current = state.currentVideoId;
-      if (state.playing) player.load(state.currentVideoId, target);
-      else player.cue(state.currentVideoId, target);
-    } else if (Math.abs(player.getCurrentTime() - target) > 0.5) {
+      if (state.playing) player.load(state.currentVideoId, rawTarget);
+      else player.cue(state.currentVideoId, rawTarget);
+      return;
+    }
+
+    // Clamp to this video's duration so a seek can never land past the end
+    // (a past-end seek fires ENDED and would stop/advance the room).
+    const duration = player.getDuration();
+    const target = duration > 0 ? Math.min(rawTarget, duration) : rawTarget;
+
+    if (state.playing) {
+      // A premature ENDED that we deliberately did not report would otherwise
+      // sit at the end forever — pull it back to the room position.
+      if (player.isEnded()) {
+        if (duration > 0) player.seekTo(Math.max(0, Math.min(target, duration - 1)));
+        player.play();
+        return;
+      }
+      // Measure drift only while playback is actually running: during startup
+      // getCurrentTime() reads 0 while target keeps advancing, and hard-seeking
+      // into an unbuffered region is what froze the video seconds after play.
+      if (
+        player.isPlaying() &&
+        duration > 0 &&
+        Math.abs(player.getCurrentTime() - target) > DRIFT_TOLERANCE_S
+      ) {
+        player.seekTo(target);
+        return;
+      }
+      if (!player.isPlaying()) player.play();
+    } else if (player.isPlaying()) {
+      player.pause();
+    } else if (
+      !player.isEnded() &&
+      duration > 0 &&
+      Math.abs(player.getCurrentTime() - target) > DRIFT_TOLERANCE_S
+    ) {
       player.seekTo(target);
     }
-    if (state.playing && !player.isPlaying()) player.play();
-    if (!state.playing && player.isPlaying()) player.pause();
   }, [playbackEvent, playerReady]);
 
   useEffect(() => {
     if (status !== "joined" || !playerReady) return;
+    let overToleranceTicks = 0;
     const timer = setInterval(() => {
       const player = playerRef.current;
       const state = playbackRef.current;
       if (!player || !state?.currentVideoId) return;
       if (loadedVideoIdRef.current !== state.currentVideoId) return;
-      const target = serverPosition(state, serverNowRef.current());
-      if (state.playing) {
-        if (Math.abs(player.getCurrentTime() - target) > DRIFT_TOLERANCE_S) {
+
+      const rawTarget = serverPosition(state, serverNowRef.current());
+
+      if (!state.playing) {
+        overToleranceTicks = 0;
+        if (player.isPlaying()) player.pause();
+        return;
+      }
+
+      const duration = player.getDuration();
+      const target = duration > 0 ? Math.min(rawTarget, duration) : rawTarget;
+
+      if (player.isEnded()) {
+        overToleranceTicks = 0;
+        if (duration > 0) player.seekTo(Math.max(0, Math.min(target, duration - 1)));
+        player.play();
+        return;
+      }
+
+      if (!player.isPlaying()) {
+        // Still starting or buffering: resume without measuring drift — a seek
+        // here would restart buffering mid-startup.
+        overToleranceTicks = 0;
+        player.play();
+        return;
+      }
+
+      // Settled playback: hard-seek only when drift stays over the tolerance
+      // for two consecutive checks, so transient spikes (startup lag, an ad)
+      // don't cause a seek storm.
+      if (
+        duration > 0 &&
+        Math.abs(player.getCurrentTime() - target) > DRIFT_TOLERANCE_S
+      ) {
+        overToleranceTicks += 1;
+        if (overToleranceTicks >= 2) {
           player.seekTo(target);
+          overToleranceTicks = 0;
         }
-        if (!player.isPlaying()) player.play();
-      } else if (player.isPlaying()) {
-        player.pause();
+      } else {
+        overToleranceTicks = 0;
       }
     }, 5000);
     return () => clearInterval(timer);
@@ -226,9 +298,17 @@ export default function RoomClient({ roomId }: { roomId: string }) {
               onReady={() => setPlayerReady(true)}
               onEnded={() => {
                 const state = playbackRef.current;
-                if (state?.currentVideoId) {
-                  reportEnded(state.currentVideoId, state.version);
+                if (!state?.currentVideoId) return;
+                const player = playerRef.current;
+                if (!player) return;
+                const duration = player.getDuration();
+                if (
+                  duration > 0 &&
+                  player.getCurrentTime() < duration - ENDED_GUARD_S
+                ) {
+                  return;
                 }
+                reportEnded(state.currentVideoId, state.version);
               }}
             />
             <div className="flex flex-col gap-2 p-4">
