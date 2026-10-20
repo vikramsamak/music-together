@@ -393,6 +393,10 @@ export class RoomGateway {
     this.socketMeta.delete(client.id);
     if (!meta) return;
 
+    // Clean up rate-limit state so the Map doesn't grow unbounded
+    // as unique clientIds accumulate over the server's lifetime.
+    this.chatTimestamps.delete(meta.clientId);
+
     const room = this.rooms.get(meta.roomId);
     const member = room?.get(meta.clientId);
     if (room && member?.socketId === client.id) {

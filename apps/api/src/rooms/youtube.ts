@@ -23,7 +23,21 @@ export function parseVideoId(input: string): string | null {
   return null;
 }
 
-export async function fetchVideoTitle(videoId: string): Promise<string> {
+// Cache results (and in-flight promises) so concurrent adds of the same video
+// share one oEmbed request and repeated adds never re-fetch.
+const titleCache = new Map<string, Promise<string>>();
+
+export function fetchVideoTitle(videoId: string): Promise<string> {
+  const hit = titleCache.get(videoId);
+  if (hit) return hit;
+  const promise = _fetchTitle(videoId);
+  titleCache.set(videoId, promise);
+  // On failure, evict so the next add can retry.
+  promise.catch(() => titleCache.delete(videoId));
+  return promise;
+}
+
+async function _fetchTitle(videoId: string): Promise<string> {
   const watch = `https://www.youtube.com/watch?v=${videoId}`;
   try {
     const res = await fetch(
@@ -39,3 +53,4 @@ export async function fetchVideoTitle(videoId: string): Promise<string> {
     return videoId;
   }
 }
+

@@ -1,7 +1,7 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { ENDED, loadYouTubeApi, type YTPlayer } from "@/lib/youtube";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { ENDED, loadYouTubeApi, type YTNamespace, type YTPlayer } from "@/lib/youtube";
 
 export interface PlayerHandle {
   load(videoId: string, startSeconds?: number): void;
@@ -13,6 +13,8 @@ export interface PlayerHandle {
   getDuration(): number;
   isPlaying(): boolean;
   isEnded(): boolean;
+  isBuffering(): boolean;
+  isPaused(): boolean;
   isReady(): boolean;
 }
 
@@ -28,6 +30,7 @@ const YouTubePlayer = forwardRef<
   const readyRef = useRef(false);
   const endedRef = useRef(onEnded);
   const onReadyRef = useRef(onReady);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     endedRef.current = onEnded;
@@ -36,23 +39,28 @@ const YouTubePlayer = forwardRef<
 
   useEffect(() => {
     let cancelled = false;
-    void loadYouTubeApi().then((YT) => {
-      if (cancelled || !hostRef.current) return;
-      playerRef.current = new YT.Player(elementIdRef.current, {
-        width: "100%",
-        height: "100%",
-        playerVars: { playsinline: 1, rel: 0 },
-        events: {
-          onReady: () => {
-            readyRef.current = true;
-            onReadyRef.current?.();
+    void loadYouTubeApi().then(
+      (YT: YTNamespace) => {
+        if (cancelled || !hostRef.current) return;
+        playerRef.current = new YT.Player(elementIdRef.current, {
+          width: "100%",
+          height: "100%",
+          playerVars: { playsinline: 1, rel: 0 },
+          events: {
+            onReady: () => {
+              readyRef.current = true;
+              onReadyRef.current?.();
+            },
+            onStateChange: (event) => {
+              if (event.data === ENDED) endedRef.current();
+            },
           },
-          onStateChange: (event) => {
-            if (event.data === ENDED) endedRef.current();
-          },
-        },
-      });
-    });
+        });
+      },
+      (err: Error) => {
+        if (!cancelled) setLoadError(err.message);
+      },
+    );
     return () => {
       cancelled = true;
       readyRef.current = false;
@@ -77,6 +85,8 @@ const YouTubePlayer = forwardRef<
         getDuration: () => active()?.getDuration() ?? 0,
         isPlaying: () => active()?.getPlayerState() === 1,
         isEnded: () => active()?.getPlayerState() === ENDED,
+        isBuffering: () => active()?.getPlayerState() === 3,
+        isPaused: () => active()?.getPlayerState() === 2,
         isReady: () => readyRef.current,
       };
     },
@@ -85,7 +95,13 @@ const YouTubePlayer = forwardRef<
 
   return (
     <div ref={hostRef} className="aspect-video w-full bg-black">
-      <div id={elementIdRef.current} className="h-full w-full" />
+      {loadError ? (
+        <div className="flex h-full items-center justify-center text-sm text-red-400 px-4 text-center">
+          Could not load YouTube player: {loadError}
+        </div>
+      ) : (
+        <div id={elementIdRef.current} className="h-full w-full" />
+      )}
     </div>
   );
 });

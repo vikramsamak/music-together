@@ -109,8 +109,12 @@ export default function RoomClient({ roomId }: { roomId: string }) {
 
     if (loadedVideoIdRef.current !== state.currentVideoId) {
       loadedVideoIdRef.current = state.currentVideoId;
-      if (state.playing) player.load(state.currentVideoId, rawTarget);
-      else player.cue(state.currentVideoId, rawTarget);
+      // Clamp start position: serverPosition() can overshoot the video duration
+      // after a reconnect (stale updatedAt). Passing a past-end value to
+      // loadVideoById triggers an immediate ENDED before the video renders.
+      const clampedStart = Math.max(0, rawTarget);
+      if (state.playing) player.load(state.currentVideoId, clampedStart);
+      else player.cue(state.currentVideoId, clampedStart);
       return;
     }
 
@@ -132,13 +136,14 @@ export default function RoomClient({ roomId }: { roomId: string }) {
       // into an unbuffered region is what froze the video seconds after play.
       if (
         player.isPlaying() &&
+        !player.isBuffering() &&
         duration > 0 &&
         Math.abs(player.getCurrentTime() - target) > DRIFT_TOLERANCE_S
       ) {
         player.seekTo(target);
         return;
       }
-      if (!player.isPlaying()) player.play();
+      if (!player.isPlaying() && !player.isBuffering()) player.play();
     } else if (player.isPlaying()) {
       player.pause();
     } else if (
@@ -178,10 +183,11 @@ export default function RoomClient({ roomId }: { roomId: string }) {
       }
 
       if (!player.isPlaying()) {
-        // Still starting or buffering: resume without measuring drift — a seek
-        // here would restart buffering mid-startup.
+        // Still starting or buffering: only resume if genuinely paused.
+        // Calling play() while in state BUFFERING (3) resets the buffer cycle
+        // and is the root cause of the video appearing to auto-pause/stutter.
         overToleranceTicks = 0;
-        player.play();
+        if (!player.isBuffering()) player.play();
         return;
       }
 
@@ -304,7 +310,7 @@ export default function RoomClient({ roomId }: { roomId: string }) {
                 const duration = player.getDuration();
                 if (
                   duration > 0 &&
-                  player.getCurrentTime() < duration - ENDED_GUARD_S
+                  player.getCurrentTime() <= duration - ENDED_GUARD_S
                 ) {
                   return;
                 }
