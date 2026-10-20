@@ -4,12 +4,13 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "music-together",
     short_name: "music-together",
-    description: "Listen to YouTube Music together in a room",
+    description: "Listen to YouTube Music together in real-time synced rooms",
     start_url: "/",
     scope: "/",
     display: "standalone",
-    background_color: "#09090b",
-    theme_color: "#09090b",
+    background_color: "#07080c",
+    theme_color: "#07080c",
+    categories: ["music", "entertainment", "social"],
     icons: [
       {
         src: "/api/icons?size=192",
@@ -28,6 +29,13 @@ export default function manifest(): MetadataRoute.Manifest {
         sizes: "512x512",
         type: "image/png",
         purpose: "maskable",
+      },
+    ],
+    shortcuts: [
+      {
+        name: "Create Room",
+        url: "/",
+        description: "Start a shared listening room",
       },
     ],
   };
