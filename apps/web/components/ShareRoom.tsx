@@ -1,64 +1,157 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
+import { Check, Copy, QrCode, Share2, X } from "lucide-react";
 import { useOrigin } from "@/lib/origin";
 import { copyRoomUrl, roomUrl, shareRoom, type ShareResult } from "@/lib/share";
 
 function statusMessage(result: ShareResult): string | null {
-  if (result === "copied") return "Link copied";
-  if (result === "failed") return "Couldn't copy — select the link above.";
+  if (result === "copied") return "Link copied to clipboard!";
+  if (result === "failed") return "Couldn't copy — select the link below.";
   return null;
 }
 
 export default function ShareRoom({ roomId }: { roomId: string }) {
   const origin = useOrigin();
   const url = origin ? roomUrl(roomId, origin) : "";
+  const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
   const sharedOrigin = origin || undefined;
 
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (modalRef.current && !modalRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  const handleCopy = async () => {
+    const res = await copyRoomUrl(roomId, sharedOrigin);
+    setStatus(statusMessage(res));
+    if (res === "copied") {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleShare = async () => {
+    const res = await shareRoom(roomId, sharedOrigin);
+    setStatus(statusMessage(res));
+  };
+
   return (
-    <details className="relative">
-      <summary className="cursor-pointer list-none rounded border border-zinc-300 px-2 py-1 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">
-        Share
-      </summary>
-      <div className="absolute right-0 z-20 mt-2 flex w-64 flex-col items-center gap-3 rounded border border-zinc-200 bg-white p-3 shadow-lg dark:border-zinc-800 dark:bg-zinc-950">
-        {url ? (
-          <QRCodeSVG
-            value={url}
-            size={180}
-            bgColor="#ffffff"
-            fgColor="#18181b"
-            title={`Room ${roomId} QR code`}
-          />
-        ) : (
-          <div className="h-[180px] w-[180px] animate-pulse rounded bg-zinc-100 dark:bg-zinc-900" />
-        )}
-        <p className="w-full break-all text-center text-xs text-zinc-500">
-          {url || roomId}
-        </p>
-        <div className="flex w-full gap-2">
-          <button
-            type="button"
-            onClick={async () =>
-              setStatus(statusMessage(await copyRoomUrl(roomId, sharedOrigin)))
-            }
-            className="flex-1 rounded bg-zinc-900 px-2 py-1 text-xs font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
-          >
-            Copy link
-          </button>
-          <button
-            type="button"
-            onClick={async () =>
-              setStatus(statusMessage(await shareRoom(roomId, sharedOrigin)))
-            }
-            className="flex-1 rounded border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
-          >
-            Share…
-          </button>
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-all hover:bg-white/10 hover:border-violet-500/30 hover:text-white"
+        title="Share room"
+      >
+        <Share2 className="h-3.5 w-3.5 text-violet-400" />
+        <span>Share</span>
+      </button>
+
+      {open && (
+        <div
+          ref={modalRef}
+          className="absolute right-0 top-full z-50 mt-3 w-72 rounded-2xl border border-white/10 bg-zinc-950/95 p-4 shadow-2xl backdrop-blur-2xl transition-all"
+        >
+          <div className="flex items-center justify-between pb-3 border-b border-white/10">
+            <div className="flex items-center gap-1.5">
+              <QrCode className="h-4 w-4 text-violet-400" />
+              <span className="text-sm font-semibold text-zinc-100">
+                Invite Friends
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded-lg p-1 text-zinc-400 hover:bg-white/10 hover:text-zinc-200 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="flex flex-col items-center gap-3 pt-4">
+            <div className="rounded-xl border border-white/10 bg-white p-3 shadow-inner">
+              {url ? (
+                <QRCodeSVG
+                  value={url}
+                  size={150}
+                  bgColor="#ffffff"
+                  fgColor="#09090b"
+                  level="M"
+                  title={`Room ${roomId} QR code`}
+                />
+              ) : (
+                <div className="h-[150px] w-[150px] animate-pulse rounded-lg bg-zinc-800" />
+              )}
+            </div>
+
+            <div className="w-full text-center">
+              <span className="text-[10px] uppercase tracking-widest text-zinc-400">
+                Room Code
+              </span>
+              <p className="font-mono text-xl font-bold tracking-widest text-violet-400">
+                {roomId}
+              </p>
+            </div>
+
+            <p className="w-full break-all rounded-lg bg-black/40 px-2 py-1.5 text-center font-mono text-[11px] text-zinc-400 border border-white/5">
+              {url || roomId}
+            </p>
+
+            <div className="flex w-full gap-2">
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-violet-600 px-3 py-2 text-xs font-semibold text-white shadow-lg shadow-violet-600/25 transition-all hover:bg-violet-500 active:scale-95"
+              >
+                {copied ? (
+                  <>
+                    <Check className="h-3.5 w-3.5" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3.5 w-3.5" />
+                    <span>Copy Link</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleShare}
+                className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 transition-all hover:bg-white/10 hover:text-white active:scale-95"
+                title="Open native share menu"
+              >
+                <Share2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {status && (
+              <p className="text-center text-xs text-zinc-400 animate-fade-in">
+                {status}
+              </p>
+            )}
+          </div>
         </div>
-        {status && <p className="text-xs text-zinc-500">{status}</p>}
-      </div>
-    </details>
+      )}
+    </div>
   );
 }

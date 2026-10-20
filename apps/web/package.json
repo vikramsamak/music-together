@@ -10,6 +10,7 @@
     "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
+    "lucide-react": "^1.59.0",
     "next": "16.4.2",
     "qrcode.react": "^4.2.0",
     "react": "19.3.0",

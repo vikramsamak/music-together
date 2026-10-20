@@ -16,12 +16,17 @@ export interface PlayerHandle {
   isBuffering(): boolean;
   isPaused(): boolean;
   isReady(): boolean;
+  setVolume(volume: number): void;
+  getVolume(): number;
+  mute(): void;
+  unMute(): void;
+  isMuted(): boolean;
 }
 
 const YouTubePlayer = forwardRef<
   PlayerHandle,
-  { onEnded: () => void; onReady?: () => void }
->(function YouTubePlayer({ onEnded, onReady }, ref) {
+  { onEnded: () => void; onReady?: () => void; isPlaying?: boolean }
+>(function YouTubePlayer({ onEnded, onReady, isPlaying = false }, ref) {
   const hostRef = useRef<HTMLDivElement>(null);
   const elementIdRef = useRef(
     `yt-player-${Math.random().toString(36).slice(2, 10)}`,
@@ -45,7 +50,7 @@ const YouTubePlayer = forwardRef<
         playerRef.current = new YT.Player(elementIdRef.current, {
           width: "100%",
           height: "100%",
-          playerVars: { playsinline: 1, rel: 0 },
+          playerVars: { playsinline: 1, rel: 0, modestbranding: 1 },
           events: {
             onReady: () => {
               readyRef.current = true;
@@ -88,20 +93,34 @@ const YouTubePlayer = forwardRef<
         isBuffering: () => active()?.getPlayerState() === 3,
         isPaused: () => active()?.getPlayerState() === 2,
         isReady: () => readyRef.current,
+        setVolume: (v) => active()?.setVolume?.(v),
+        getVolume: () => active()?.getVolume?.() ?? 100,
+        mute: () => active()?.mute?.(),
+        unMute: () => active()?.unMute?.(),
+        isMuted: () => active()?.isMuted?.() ?? false,
       };
     },
     [],
   );
 
   return (
-    <div ref={hostRef} className="aspect-video w-full bg-black">
-      {loadError ? (
-        <div className="flex h-full items-center justify-center text-sm text-red-400 px-4 text-center">
-          Could not load YouTube player: {loadError}
-        </div>
-      ) : (
-        <div id={elementIdRef.current} className="h-full w-full" />
-      )}
+    <div className="relative w-full overflow-hidden rounded-2xl bg-zinc-950 shadow-2xl border border-white/10 group">
+      {/* Ambient glow behind the player */}
+      <div
+        className={`pointer-events-none absolute -inset-4 rounded-3xl bg-gradient-to-r from-violet-600/20 via-cyan-500/15 to-fuchsia-600/20 blur-xl transition-opacity duration-700 ${
+          isPlaying ? "opacity-100" : "opacity-0"
+        }`}
+      />
+      <div ref={hostRef} className="relative aspect-video w-full overflow-hidden rounded-2xl bg-black">
+        {loadError ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-sm text-red-400">
+            <span className="font-medium">Could not load YouTube player</span>
+            <span className="text-xs text-zinc-500">{loadError}</span>
+          </div>
+        ) : (
+          <div id={elementIdRef.current} className="h-full w-full" />
+        )}
+      </div>
     </div>
   );
 });

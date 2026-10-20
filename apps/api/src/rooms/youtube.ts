@@ -53,4 +53,3 @@ async function _fetchTitle(videoId: string): Promise<string> {
     return videoId;
   }
 }
-

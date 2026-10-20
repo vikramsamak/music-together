@@ -26,7 +26,12 @@ export async function generateMetadata(
 export default function RoomPage(props: PageProps<"/room/[id]">) {
   return (
     <Suspense
-      fallback={<div className="p-8 text-zinc-500">Loading room...</div>}
+      fallback={
+        <div className="min-h-dvh flex flex-col items-center justify-center bg-[#07080c] text-zinc-400 gap-3">
+          <div className="h-8 w-8 rounded-full border-2 border-violet-500/30 border-t-violet-500 animate-spin" />
+          <span className="text-xs font-mono tracking-wider uppercase">Loading room...</span>
+        </div>
+      }
     >
       <RoomContent params={props.params} />
     </Suspense>
