@@ -115,6 +115,9 @@ export default function RoomClient({ roomId }: { roomId: string }) {
     onSeek: (position) => {
       seek(position);
       playerRef.current?.seekTo(position);
+      if (!playbackRef.current?.playing) {
+        playerRef.current?.pause();
+      }
     },
   });
   useWakeLock(playing && status === "joined");
@@ -170,14 +173,19 @@ export default function RoomClient({ roomId }: { roomId: string }) {
         return;
       }
       if (!player.isPlaying() && !player.isBuffering()) player.play();
-    } else if (player.isPlaying()) {
-      player.pause();
-    } else if (
-      !player.isEnded() &&
-      dur > 0 &&
-      Math.abs(player.getCurrentTime() - target) > DRIFT_TOLERANCE_S
-    ) {
-      player.seekTo(target);
+    } else {
+      // Room is paused: enforce pause and prevent seek-induced autoplay
+      if (player.isPlaying()) {
+        player.pause();
+      }
+      if (
+        !player.isEnded() &&
+        dur > 0 &&
+        Math.abs(player.getCurrentTime() - target) > DRIFT_TOLERANCE_S
+      ) {
+        player.seekTo(target);
+        player.pause();
+      }
     }
   }, [playbackEvent, playerReady]);
 
@@ -242,6 +250,9 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   const commitSeek = (seconds: number) => {
     seek(seconds);
     playerRef.current?.seekTo(seconds);
+    if (!playbackRef.current?.playing) {
+      playerRef.current?.pause();
+    }
   };
 
   const copyCode = () => {
@@ -414,6 +425,16 @@ export default function RoomClient({ roomId }: { roomId: string }) {
               ref={playerRef}
               isPlaying={playing}
               onReady={() => setPlayerReady(true)}
+              onPlay={() => {
+                if (!playbackRef.current?.playing) {
+                  play();
+                }
+              }}
+              onPause={() => {
+                if (playbackRef.current?.playing) {
+                  pause();
+                }
+              }}
               onEnded={() => {
                 const state = playbackRef.current;
                 if (!state?.currentVideoId) return;

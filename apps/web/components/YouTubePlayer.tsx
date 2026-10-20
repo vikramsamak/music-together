@@ -1,7 +1,14 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { ENDED, loadYouTubeApi, type YTNamespace, type YTPlayer } from "@/lib/youtube";
+import {
+  ENDED,
+  PAUSED,
+  PLAYING,
+  loadYouTubeApi,
+  type YTNamespace,
+  type YTPlayer,
+} from "@/lib/youtube";
 
 export interface PlayerHandle {
   load(videoId: string, startSeconds?: number): void;
@@ -25,8 +32,17 @@ export interface PlayerHandle {
 
 const YouTubePlayer = forwardRef<
   PlayerHandle,
-  { onEnded: () => void; onReady?: () => void; isPlaying?: boolean }
->(function YouTubePlayer({ onEnded, onReady, isPlaying = false }, ref) {
+  {
+    onEnded: () => void;
+    onReady?: () => void;
+    onPlay?: () => void;
+    onPause?: () => void;
+    isPlaying?: boolean;
+  }
+>(function YouTubePlayer(
+  { onEnded, onReady, onPlay, onPause, isPlaying = false },
+  ref,
+) {
   const hostRef = useRef<HTMLDivElement>(null);
   const elementIdRef = useRef(
     `yt-player-${Math.random().toString(36).slice(2, 10)}`,
@@ -35,12 +51,16 @@ const YouTubePlayer = forwardRef<
   const readyRef = useRef(false);
   const endedRef = useRef(onEnded);
   const onReadyRef = useRef(onReady);
+  const onPlayRef = useRef(onPlay);
+  const onPauseRef = useRef(onPause);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     endedRef.current = onEnded;
     onReadyRef.current = onReady;
-  }, [onEnded, onReady]);
+    onPlayRef.current = onPlay;
+    onPauseRef.current = onPause;
+  }, [onEnded, onReady, onPlay, onPause]);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,7 +77,13 @@ const YouTubePlayer = forwardRef<
               onReadyRef.current?.();
             },
             onStateChange: (event) => {
-              if (event.data === ENDED) endedRef.current();
+              if (event.data === ENDED) {
+                endedRef.current();
+              } else if (event.data === PLAYING) {
+                onPlayRef.current?.();
+              } else if (event.data === PAUSED) {
+                onPauseRef.current?.();
+              }
             },
           },
         });
