@@ -90,6 +90,13 @@ export class RoomGateway {
 
     await client.join(`room:${roomId}`);
     this.socketMeta.set(client.id, { roomId, clientId, name });
+    // Auto-start playback when a user joins a room that has a current video.
+    // This ensures new listeners can immediately sync to the playing track.
+    const joinPlayback = await this.roomsService.getPlayback(roomId);
+    if (joinPlayback.currentVideoId) {
+      const next = await this.roomsService.setPlayback(roomId, { playing: true });
+      this.emitPlayback(roomId, next, client.id);
+    }
 
     const members = this.addMember(roomId, clientId, name, client.id);
     const chat = await this.roomsService.getChat(roomId);

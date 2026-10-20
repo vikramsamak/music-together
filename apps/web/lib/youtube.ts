@@ -1,6 +1,8 @@
 export interface YTPlayer {
   loadVideoById(options: { videoId: string; startSeconds?: number }): void;
+  loadVideoById(videoId: string, startSeconds?: number): void;
   cueVideoById(options: { videoId: string; startSeconds?: number }): void;
+  cueVideoById(videoId: string, startSeconds?: number): void;
   playVideo(): void;
   pauseVideo(): void;
   seekTo(seconds: number, allowSeekAhead: boolean): void;
@@ -17,14 +19,16 @@ export interface YTPlayer {
 
 export interface YTNamespace {
   Player: new (
-    element: string,
+    element: string | HTMLElement,
     options: {
       width?: string | number;
       height?: string | number;
-      playerVars?: Record<string, string | number>;
+      videoId?: string;
+      playerVars?: Record<string, string | number | boolean | undefined>;
       events?: {
         onReady?: () => void;
         onStateChange?: (event: { data: number }) => void;
+        onError?: (event: { data: number }) => void;
       };
     },
   ) => YTPlayer;

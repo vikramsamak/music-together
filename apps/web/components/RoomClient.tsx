@@ -88,6 +88,7 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   const [nowSec, setNowSec] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playerReady, setPlayerReady] = useState(false);
+  const [localPlaying, setLocalPlaying] = useState(false);
   const [activePanel, setActivePanel] = useState<"chat" | "queue" | "members">("chat");
   const [addMode, setAddMode] = useState<"search" | "url">("search");
   const [volume, setVolume] = useState(100);
@@ -235,7 +236,7 @@ export default function RoomClient({ roomId }: { roomId: string }) {
     return () => clearInterval(timer);
   }, [status, playerReady, playbackRef]);
 
-  // Scrubber animation ticker
+  // Scrubber animation ticker & local playing state
   useEffect(() => {
     const timer = setInterval(() => {
       const player = playerRef.current;
@@ -243,9 +244,44 @@ export default function RoomClient({ roomId }: { roomId: string }) {
       setNowSec(player.getCurrentTime());
       const d = player.getDuration();
       if (d > 0) setDuration(d);
+      setLocalPlaying(player.isPlaying());
     }, 250);
     return () => clearInterval(timer);
   }, [playerReady]);
+
+  const handleUserSync = () => {
+    const player = playerRef.current;
+    const state = playbackRef.current;
+    if (!player || !state?.currentVideoId) return;
+    const rawTarget = serverPosition(state, serverNowRef.current());
+    const dur = player.getDuration();
+    const target = dur > 0 ? Math.min(rawTarget, dur) : rawTarget;
+    player.seekTo(Math.max(0, target));
+    player.unMute();
+    player.play();
+    setLocalPlaying(true);
+  };
+
+  // User interaction listener to unblock autoplay if user clicks anywhere in the room
+  useEffect(() => {
+    const unblock = () => {
+      const player = playerRef.current;
+      const state = playbackRef.current;
+      if (player && state?.playing && !player.isPlaying()) {
+        const rawTarget = serverPosition(state, serverNowRef.current());
+        const dur = player.getDuration();
+        const target = dur > 0 ? Math.min(rawTarget, dur) : rawTarget;
+        player.seekTo(Math.max(0, target));
+        player.play();
+      }
+    };
+    window.addEventListener("pointerdown", unblock, { passive: true });
+    window.addEventListener("keydown", unblock, { passive: true });
+    return () => {
+      window.removeEventListener("pointerdown", unblock);
+      window.removeEventListener("keydown", unblock);
+    };
+  }, []);
 
   const commitSeek = (seconds: number) => {
     seek(seconds);
@@ -421,32 +457,46 @@ export default function RoomClient({ roomId }: { roomId: string }) {
             </div>
 
             {/* Embedded YouTube Player */}
-            <YouTubePlayer
-              ref={playerRef}
-              isPlaying={playing}
-              onReady={() => setPlayerReady(true)}
-              onPlay={() => {
-                if (!playbackRef.current?.playing) {
-                  play();
-                }
-              }}
-              onPause={() => {
-                if (playbackRef.current?.playing) {
-                  pause();
-                }
-              }}
-              onEnded={() => {
-                const state = playbackRef.current;
-                if (!state?.currentVideoId) return;
-                const player = playerRef.current;
-                if (!player) return;
-                const dur = player.getDuration();
-                if (dur > 0 && player.getCurrentTime() <= dur - ENDED_GUARD_S) {
-                  return;
-                }
-                reportEnded(state.currentVideoId, state.version);
-              }}
-            />
+            <div className="relative w-full">
+              <YouTubePlayer
+                ref={playerRef}
+                videoId={playback?.currentVideoId || undefined}
+                isPlaying={playing}
+                onReady={() => setPlayerReady(true)}
+                onPlay={() => setLocalPlaying(true)}
+                onPause={() => setLocalPlaying(false)}
+                onEnded={() => {
+                  const state = playbackRef.current;
+                  if (!state?.currentVideoId) return;
+                  const player = playerRef.current;
+                  if (!player) return;
+                  const dur = player.getDuration();
+                  if (dur > 0 && player.getCurrentTime() <= dur - ENDED_GUARD_S) {
+                    return;
+                  }
+                  reportEnded(state.currentVideoId, state.version);
+                }}
+              />
+
+              {/* Autoplay blocked overlay: shown if room is playing but local player hasn't started */}
+              {playing && !localPlaying && playback?.currentVideoId && (
+                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center rounded-2xl bg-black/75 backdrop-blur-sm p-4 text-center transition-all animate-in fade-in duration-300">
+                  <button
+                    type="button"
+                    onClick={handleUserSync}
+                    className="group flex items-center gap-3 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-3.5 text-white shadow-xl shadow-violet-600/40 hover:scale-105 active:scale-95 transition-all cursor-pointer border border-white/20"
+                  >
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20 group-hover:bg-white/30 transition-colors">
+                      <Play className="h-5 w-5 fill-current ml-0.5" />
+                    </div>
+                    <div className="text-left">
+                      <div className="font-bold text-sm sm:text-base">Tap to Listen in Sync</div>
+                      <div className="text-xs text-violet-200">Room is currently playing music</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Now Playing Banner & Controls */}
             <div className="mt-5 flex flex-col gap-4">
@@ -509,12 +559,20 @@ export default function RoomClient({ roomId }: { roomId: string }) {
                   {/* Play / Pause Primary Button */}
                   <button
                     type="button"
-                    onClick={() => (playing ? pause() : play())}
+                    onClick={() => {
+                      if (!playing) {
+                        play();
+                      } else if (!localPlaying) {
+                        handleUserSync();
+                      } else {
+                        pause();
+                      }
+                    }}
                     disabled={!playback?.currentVideoId}
                     className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-lg shadow-violet-600/30 transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                    title={playing ? "Pause" : "Play"}
+                    title={playing ? (localPlaying ? "Pause" : "Join Playback") : "Play"}
                   >
-                    {playing ? (
+                    {playing && localPlaying ? (
                       <Pause className="h-5 w-5 fill-current" />
                     ) : (
                       <Play className="h-5 w-5 fill-current ml-0.5" />
